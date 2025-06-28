@@ -51,14 +51,14 @@ protocolVersion = "2025-06-18"
 data InitializeRequest = InitializeRequest
   { initProtocolVersion :: Text
   , initCapabilities    :: Value
-  , initClientInfo      :: Value
+  , initClientInfo      :: Maybe Value
   } deriving (Show, Eq, Generic)
 
 instance FromJSON InitializeRequest where
   parseJSON = withObject "InitializeRequest" $ \o -> InitializeRequest
     <$> o .: "protocolVersion"
     <*> o .: "capabilities"
-    <*> o .: "clientInfo"
+    <*> o .:? "clientInfo"
 
 -- | Initialize response
 data InitializeResponse = InitializeResponse
