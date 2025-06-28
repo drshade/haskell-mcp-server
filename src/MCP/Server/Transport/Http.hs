@@ -10,6 +10,7 @@ module MCP.Server.Transport.Http
 
 import           Control.Monad            (when)
 import           Data.Aeson
+import qualified Data.ByteString          as BS
 import qualified Data.ByteString.Lazy     as BSL
 import           Data.String              (IsString (fromString))
 import           Data.Text                (Text)
@@ -22,6 +23,7 @@ import           System.IO                (hPutStrLn, stderr)
 
 import           MCP.Server.Handlers
 import           MCP.Server.JsonRpc
+import           MCP.Server.Protocol (protocolVersion)
 import           MCP.Server.Types
 
 -- | HTTP transport configuration following MCP 2025-03-26 Streamable HTTP specification
@@ -44,6 +46,19 @@ defaultHttpConfig = HttpConfig
 -- | Helper for conditional logging
 logVerbose :: HttpConfig -> String -> IO ()
 logVerbose config msg = when (httpVerbose config) $ hPutStrLn stderr msg
+
+-- | Extract MCP protocol version from headers
+getMcpProtocolVersion :: Wai.Request -> Maybe Text
+getMcpProtocolVersion req = do
+  headerValue <- lookup "MCP-Protocol-Version" (Wai.requestHeaders req)
+  return $ TE.decodeUtf8 headerValue
+
+-- | Create response headers with MCP protocol version
+mcpResponseHeaders :: Maybe Text -> [(HeaderName, BS.ByteString)]
+mcpResponseHeaders negotiatedVersion =
+  let baseHeaders = [("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*")]
+      versionHeader = maybe [] (\v -> [("MCP-Protocol-Version", TE.encodeUtf8 v)]) negotiatedVersion
+  in baseHeaders ++ versionHeader
 
 
 -- | Transport-specific implementation for HTTP
@@ -77,7 +92,7 @@ handleMcpRequest config serverInfo handlers req respond = do
             [ "name" .= serverName serverInfo
             , "version" .= serverVersion serverInfo
             , "description" .= serverInstructions serverInfo
-            , "protocolVersion" .= ("2025-03-26" :: Text)
+            , "protocolVersion" .= protocolVersion
             , "capabilities" .= object
                 [ "tools" .= object []
                 , "prompts" .= object []
@@ -94,15 +109,17 @@ handleMcpRequest config serverInfo handlers req respond = do
     "POST" -> do
       -- Read request body
       body <- Wai.strictRequestBody req
+      let clientProtocolVersion = getMcpProtocolVersion req
       logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
-      handleJsonRpcRequest config serverInfo handlers body respond
+      logVerbose config $ "Client protocol version: " ++ show clientProtocolVersion
+      handleJsonRpcRequest config serverInfo handlers clientProtocolVersion body respond
 
     -- OPTIONS for CORS preflight
     "OPTIONS" -> respond $ Wai.responseLBS
       status200
       [ ("Access-Control-Allow-Origin", "*")
       , ("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-      , ("Access-Control-Allow-Headers", "Content-Type")
+      , ("Access-Control-Allow-Headers", "Content-Type, MCP-Protocol-Version")
       ]
       ""
 
@@ -113,8 +130,8 @@ handleMcpRequest config serverInfo handlers req respond = do
       "Method Not Allowed"
 
 -- | Handle JSON-RPC request from HTTP body
-handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleJsonRpcRequest config serverInfo handlers body respond = do
+handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> Maybe Text -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleJsonRpcRequest config serverInfo handlers clientProtocolVersion body respond = do
   case eitherDecode body of
     Left err -> do
       hPutStrLn stderr $ "JSON parse error: " ++ err
@@ -123,11 +140,11 @@ handleJsonRpcRequest config serverInfo handlers body respond = do
         [("Content-Type", "application/json")]
         (encode $ object ["error" .= ("Invalid JSON" :: Text)])
 
-    Right jsonValue -> handleSingleJsonRpc config serverInfo handlers jsonValue respond
+    Right jsonValue -> handleSingleJsonRpc config serverInfo handlers clientProtocolVersion jsonValue respond
 
 -- | Handle a single JSON-RPC message
-handleSingleJsonRpc :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> Value -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleSingleJsonRpc config serverInfo handlers jsonValue respond = do
+handleSingleJsonRpc :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> Maybe Text -> Value -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleSingleJsonRpc config serverInfo handlers clientProtocolVersion jsonValue respond = do
   case parseJsonRpcMessage jsonValue of
     Left err -> do
       hPutStrLn stderr $ "JSON-RPC parse error: " ++ err
@@ -146,7 +163,7 @@ handleSingleJsonRpc config serverInfo handlers jsonValue respond = do
           logVerbose config $ "Sending HTTP response for: " ++ show (getMessageSummary message)
           respond $ Wai.responseLBS
             status200
-            [("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*")]
+            (mcpResponseHeaders clientProtocolVersion)
             responseJson
 
         Nothing -> do
@@ -154,7 +171,7 @@ handleSingleJsonRpc config serverInfo handlers jsonValue respond = do
           -- For notifications, return 200 with empty JSON object (per MCP spec)
           respond $ Wai.responseLBS 
             status200 
-            [("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*")] 
+            (mcpResponseHeaders clientProtocolVersion)
             "{}"
 
 

@@ -167,8 +167,10 @@ spec = describe "Unicode Handling" $ do
       let promptListHandler = return [
             PromptDefinition
               { promptDefinitionName = "math_formula"
+              , promptDefinitionTitle = Nothing
               , promptDefinitionDescription = "Generate mathematical formulas with Unicode: ∀∃∈√"
               , promptDefinitionArguments = [ArgumentDefinition "formula" "Mathematical expression" True]
+              , promptDefinitionMeta = Nothing
               }
             ]
 
@@ -182,8 +184,10 @@ spec = describe "Unicode Handling" $ do
             ResourceDefinition
               { resourceDefinitionURI = "resource://unicode_symbols"
               , resourceDefinitionName = "unicode_symbols"
+              , resourceDefinitionTitle = Nothing
               , resourceDefinitionDescription = Just "Unicode mathematical symbols: ∀∃∈∉√∑"
               , resourceDefinitionMimeType = Just "text/plain"
+              , resourceDefinitionMeta = Nothing
               }
             ]
 
@@ -195,11 +199,13 @@ spec = describe "Unicode Handling" $ do
       let toolListHandler = return [
             ToolDefinition
               { toolDefinitionName = "calculate"
+              , toolDefinitionTitle = Nothing
               , toolDefinitionDescription = "Calculate with Unicode symbols: √∑∏"
               , toolDefinitionInputSchema = InputSchemaDefinitionObject
                   { properties = [("expression", InputSchemaDefinitionProperty "string" "Mathematical expression")]
                   , required = ["expression"]
                   }
+              , toolDefinitionMeta = Nothing
               }
             ]
 

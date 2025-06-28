@@ -4,11 +4,11 @@ A fully-featured Haskell library for building [Model Context Protocol (MCP)](htt
 
 ## Features
 
-- **Complete MCP Implementation**: Supports MCP 2025-03-26 specification (with backward compatibility for 2024-11-05)
+- **Complete MCP Implementation**: Supports MCP 2025-06-18 specification (with backward compatibility for 2025-03-26 and 2024-11-05)
 - **Type-Safe API**: Leverage Haskell's type system for robust MCP servers
 - **Multiple Abstractions**: Both low-level fine-grained control and high-level derived interfaces
 - **Template Haskell Support**: Automatic handler derivation from data types
-- **Multiple Transports**: STDIO and HTTP Streaming transport (MCP 2025-03-26 Streamable HTTP)
+- **Multiple Transports**: STDIO and HTTP Streaming transport (MCP 2025-06-18 Streamable HTTP)
 
 ## Supported MCP Features
 
@@ -134,6 +134,23 @@ data SimpleTool
 
 All parameter types must ultimately resolve to records with named fields to generate proper MCP schemas.
 
+## MCP 2025-06-18 Features
+
+The library supports the latest MCP specification features:
+
+### Optional Metadata and Title Fields
+
+Prompts, resources, and tools can now include optional `title` and `_meta` fields:
+
+### Backward Compatibility
+
+The library maintains full backward compatibility:
+- **2025-06-18**: Latest features including `title` and `_meta` fields, HTTP protocol headers
+- **2025-03-26**: Previous version support without new fields
+- **2024-11-05**: Legacy version support
+
+Version negotiation happens automatically during the initialization handshake.
+
 ## Custom Descriptions
 
 You can provide custom descriptions for constructors and fields using the `*WithDescription` variants:
@@ -178,9 +195,9 @@ main = runMcpServerStdio serverInfo handlers
       }
 ```
 
-## HTTP Transport (NEW!)
+## HTTP Transport
 
-The library now supports MCP 2025-03-26 Streamable HTTP transport:
+The library supports MCP 2025-06-18 Streamable HTTP transport with protocol version headers:
 
 ```haskell
 import MCP.Server.Transport.Http
@@ -203,7 +220,8 @@ main = runMcpServerHttpWithConfig customConfig serverInfo handlers
 - CORS enabled for web clients  
 - GET `/mcp` for server discovery
 - POST `/mcp` for JSON-RPC messages
-- Full MCP 2025-03-26 compliance
+- Protocol version negotiation via `MCP-Protocol-Version` header
+- Full MCP 2025-06-18 compliance with backward compatibility
 
 ## Examples
 
