@@ -38,12 +38,13 @@ module MCP.Server.Protocol
 
 import           Data.Aeson
 import           Data.Map         (Map)
+import           Data.Maybe       (catMaybes)
 import           Data.Text        (Text)
 import           GHC.Generics     (Generic)
 import           MCP.Server.Types
 
 protocolVersion :: Text
-protocolVersion = "2025-03-26"
+protocolVersion = "2025-06-18"
 
 
 -- | Initialize request
@@ -64,17 +65,19 @@ data InitializeResponse = InitializeResponse
   { initRespProtocolVersion :: Text
   , initRespCapabilities    :: ServerCapabilities
   , initRespServerInfo      :: McpServerInfo
+  , initRespMeta            :: Maybe Value
   } deriving (Show, Eq, Generic)
 
 instance ToJSON InitializeResponse where
-  toJSON resp = object
-    [ "protocolVersion" .= initRespProtocolVersion resp
-    , "capabilities" .= initRespCapabilities resp
-    , "serverInfo" .= object
+  toJSON resp = object $ catMaybes
+    [ Just ("protocolVersion" .= initRespProtocolVersion resp)
+    , Just ("capabilities" .= initRespCapabilities resp)
+    , Just ("serverInfo" .= object
         [ "name" .= serverName (initRespServerInfo resp)
         , "version" .= serverVersion (initRespServerInfo resp)
         , "instructions" .= serverInstructions (initRespServerInfo resp)
-        ]
+        ])
+    , fmap ("_meta" .=) (initRespMeta resp)
     ]
 
 -- | Initialized notification (no parameters)

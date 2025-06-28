@@ -196,13 +196,17 @@ data PromptDefinition = PromptDefinition
   { promptDefinitionName        :: Text
   , promptDefinitionDescription :: Text
   , promptDefinitionArguments   :: [ArgumentDefinition]
+  , promptDefinitionTitle       :: Maybe Text
+  , promptDefinitionMeta        :: Maybe Value
   } deriving (Show, Eq, Generic)
 
 instance ToJSON PromptDefinition where
-  toJSON def = object
-    [ "name" .= promptDefinitionName def
-    , "description" .= promptDefinitionDescription def
-    , "arguments" .= promptDefinitionArguments def
+  toJSON def = object $ catMaybes
+    [ Just ("name" .= promptDefinitionName def)
+    , Just ("description" .= promptDefinitionDescription def)
+    , Just ("arguments" .= promptDefinitionArguments def)
+    , fmap ("title" .=) (promptDefinitionTitle def)
+    , fmap ("_meta" .=) (promptDefinitionMeta def)
     ]
 
 -- | Resource definition
@@ -211,28 +215,36 @@ data ResourceDefinition = ResourceDefinition
   , resourceDefinitionName        :: Text
   , resourceDefinitionDescription :: Maybe Text
   , resourceDefinitionMimeType    :: Maybe Text
+  , resourceDefinitionTitle       :: Maybe Text
+  , resourceDefinitionMeta        :: Maybe Value
   } deriving (Show, Eq, Generic)
 
 instance ToJSON ResourceDefinition where
-  toJSON def = object $
-    [ "uri" .= resourceDefinitionURI def
-    , "name" .= resourceDefinitionName def
-    ] ++
-    maybe [] (\d -> ["description" .= d]) (resourceDefinitionDescription def) ++
-    maybe [] (\m -> ["mimeType" .= m]) (resourceDefinitionMimeType def)
+  toJSON def = object $ catMaybes
+    [ Just ("uri" .= resourceDefinitionURI def)
+    , Just ("name" .= resourceDefinitionName def)
+    , fmap ("description" .=) (resourceDefinitionDescription def)
+    , fmap ("mimeType" .=) (resourceDefinitionMimeType def)
+    , fmap ("title" .=) (resourceDefinitionTitle def)
+    , fmap ("_meta" .=) (resourceDefinitionMeta def)
+    ]
 
 -- | Tool definition
 data ToolDefinition = ToolDefinition
   { toolDefinitionName        :: Text
   , toolDefinitionDescription :: Text
   , toolDefinitionInputSchema :: InputSchemaDefinition
+  , toolDefinitionTitle       :: Maybe Text
+  , toolDefinitionMeta        :: Maybe Value
   } deriving (Show, Eq, Generic)
 
 instance ToJSON ToolDefinition where
-  toJSON def = object
-    [ "name" .= toolDefinitionName def
-    , "description" .= toolDefinitionDescription def
-    , "inputSchema" .= toolDefinitionInputSchema def
+  toJSON def = object $ catMaybes
+    [ Just ("name" .= toolDefinitionName def)
+    , Just ("description" .= toolDefinitionDescription def)
+    , Just ("inputSchema" .= toolDefinitionInputSchema def)
+    , fmap ("title" .=) (toolDefinitionTitle def)
+    , fmap ("_meta" .=) (toolDefinitionMeta def)
     ]
 
 -- | Argument definition for prompts

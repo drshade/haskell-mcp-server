@@ -61,10 +61,11 @@ getMessageSummary (JsonRpcMessageResponse resp) =
 -- | Validate protocol version and return negotiated version
 validateProtocolVersion :: Text -> Either Text Text
 validateProtocolVersion clientVersion
-  | clientVersion == protocolVersion = Right protocolVersion  -- Exact match (2025-03-26)
-  | clientVersion == "2025-03-26" = Right "2025-03-26"        -- Accept latest version
+  | clientVersion == protocolVersion = Right protocolVersion  -- Exact match (2025-06-18)
+  | clientVersion == "2025-06-18" = Right "2025-06-18"        -- Accept latest version
+  | clientVersion == "2025-03-26" = Right "2025-03-26"        -- Accept previous version
   | clientVersion == "2024-11-05" = Right "2024-11-05"        -- Accept legacy version
-  | otherwise = Left $ "Unsupported protocol version: " <> clientVersion <> ". Server supports: 2025-03-26, 2024-11-05"
+  | otherwise = Left $ "Unsupported protocol version: " <> clientVersion <> ". Server supports: 2025-06-18, 2025-03-26, 2024-11-05"
 
 -- | Handle an MCP message and return a response if needed
 handleMcpMessage :: (MonadIO m)
@@ -139,6 +140,7 @@ handleInitialize serverInfo req = do
                     { initRespProtocolVersion = negotiatedVersion
                     , initRespCapabilities = capabilities
                     , initRespServerInfo = serverInfo
+                    , initRespMeta = Nothing
                     }
               return $ makeSuccessResponse (requestId req) (toJSON response)
 
