@@ -17,7 +17,6 @@ module MCP.Server
   , module MCP.Server.Types
   ) where
 
-import           Control.Monad.IO.Class (MonadIO)
 import           Data.Aeson
 import           Data.Text              (Text)
 import qualified Data.Text              as T
