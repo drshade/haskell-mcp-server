@@ -75,8 +75,10 @@ mkPromptDefWithDescription descriptions con =
             Nothing   -> "Handle " ++ constructorName
       [| PromptDefinition
           { promptDefinitionName = $(litE $ stringL $ T.unpack promptName)
+          , promptDefinitionTitle = Nothing
           , promptDefinitionDescription = $(litE $ stringL description)
           , promptDefinitionArguments = []
+          , promptDefinitionMeta = Nothing
           } |]
     RecC name fields -> do
       let promptName = T.pack . toSnakeCase . nameBase $ name
@@ -87,8 +89,10 @@ mkPromptDefWithDescription descriptions con =
       args <- sequence $ map (mkArgDef descriptions) fields
       [| PromptDefinition
           { promptDefinitionName = $(litE $ stringL $ T.unpack promptName)
+          , promptDefinitionTitle = Nothing
           , promptDefinitionDescription = $(litE $ stringL description)
           , promptDefinitionArguments = $(return $ ListE args)
+          , promptDefinitionMeta = Nothing
           } |]
     NormalC name [(_bang, paramType)] -> do
       -- Handle separate parameter types approach
@@ -100,8 +104,10 @@ mkPromptDefWithDescription descriptions con =
       args <- extractFieldsFromType descriptions paramType
       [| PromptDefinition
           { promptDefinitionName = $(litE $ stringL $ T.unpack promptName)
+          , promptDefinitionTitle = Nothing
           , promptDefinitionDescription = $(litE $ stringL description)
           , promptDefinitionArguments = $(return $ ListE args)
+          , promptDefinitionMeta = Nothing
           } |]
     _ -> fail "Unsupported constructor type"
 
@@ -365,10 +371,12 @@ mkResourceDefWithDescription descriptions (NormalC name []) = do
   [| ResourceDefinition
       { resourceDefinitionURI = $(litE $ stringL resourceURI)
       , resourceDefinitionName = $(litE $ stringL $ T.unpack resourceName)
+      , resourceDefinitionTitle = Nothing
       , resourceDefinitionDescription = $(case description of
           Just desc -> [| Just $(litE $ stringL desc) |]
           Nothing   -> [| Nothing |])
       , resourceDefinitionMimeType = Just "text/plain"
+      , resourceDefinitionMeta = Nothing
       } |]
 mkResourceDefWithDescription _ _ = fail "Unsupported constructor type for resources"
 
@@ -423,11 +431,13 @@ mkToolDefWithDescription descriptions con =
             Nothing   -> constructorName
       [| ToolDefinition
           { toolDefinitionName = $(litE $ stringL $ T.unpack toolName)
+          , toolDefinitionTitle = Nothing
           , toolDefinitionDescription = $(litE $ stringL description)
           , toolDefinitionInputSchema = InputSchemaDefinitionObject
               { properties = []
               , required = []
               }
+          , toolDefinitionMeta = Nothing
           } |]
     RecC name fields -> do
       let toolName = T.pack . toSnakeCase . nameBase $ name
@@ -445,11 +455,13 @@ mkToolDefWithDescription descriptions con =
       let required = [f | Just f <- requiredFields]
       [| ToolDefinition
           { toolDefinitionName = $(litE $ stringL $ T.unpack toolName)
+          , toolDefinitionTitle = Nothing
           , toolDefinitionDescription = $(litE $ stringL description)
           , toolDefinitionInputSchema = InputSchemaDefinitionObject
               { properties = $(return $ ListE props)
               , required = $(return $ ListE $ map (LitE . StringL) required)
               }
+          , toolDefinitionMeta = Nothing
           } |]
     NormalC name [(_bang, paramType)] -> do
       -- Handle separate parameter types approach for tools
@@ -469,11 +481,13 @@ mkToolDefWithDescription descriptions con =
       let required = [f | Just f <- requiredFields]
       [| ToolDefinition
           { toolDefinitionName = $(litE $ stringL $ T.unpack toolName)
+          , toolDefinitionTitle = Nothing
           , toolDefinitionDescription = $(litE $ stringL description)
           , toolDefinitionInputSchema = InputSchemaDefinitionObject
               { properties = $(return $ ListE props)
               , required = $(return $ ListE $ map (LitE . StringL) required)
               }
+          , toolDefinitionMeta = Nothing
           } |]
     _ -> fail "Unsupported constructor type for tools"
 

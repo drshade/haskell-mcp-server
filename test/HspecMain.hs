@@ -8,6 +8,7 @@ import qualified Spec.BasicDerivation
 import qualified Spec.SchemaValidation
 import qualified Spec.AdvancedDerivation
 import qualified Spec.UnicodeHandling
+import qualified Spec.VersionNegotiation
 
 main :: IO ()
 main = hspec $ do
@@ -17,3 +18,4 @@ main = hspec $ do
     Spec.SchemaValidation.spec
     Spec.AdvancedDerivation.spec
     Spec.UnicodeHandling.spec
+    Spec.VersionNegotiation.spec
