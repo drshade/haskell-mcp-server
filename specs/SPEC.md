@@ -14,10 +14,10 @@ The MCP spec is a specialisation of the JSON-RPC specification, exposing a numbe
 This library is compliant with the following MCP specifications for building MCP Servers which can be found here:
 
 | Item | Spec URL |
-| Overview | https://modelcontextprotocol.io/specification/2024-11-05/server |
-| Prompts | https://modelcontextprotocol.io/specification/2024-11-05/server/prompts |
-| Resources | https://modelcontextprotocol.io/specification/2024-11-05/server/resources |
-| Tools | https://modelcontextprotocol.io/specification/2024-11-05/server/tools |
+| Overview | https://modelcontextprotocol.io/specification/2025-06-18/server |
+| Prompts | https://modelcontextprotocol.io/specification/2025-06-18/server/prompts |
+| Resources | https://modelcontextprotocol.io/specification/2025-06-18/server/resources |
+| Tools | https://modelcontextprotocol.io/specification/2025-06-18/server/tools |
 
 # Library itself
 

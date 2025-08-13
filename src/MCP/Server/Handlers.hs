@@ -61,10 +61,8 @@ getMessageSummary (JsonRpcMessageResponse resp) =
 -- | Validate protocol version and return negotiated version
 validateProtocolVersion :: Text -> Either Text Text
 validateProtocolVersion clientVersion
-  | clientVersion == protocolVersion = Right protocolVersion  -- Exact match (2025-03-26)
-  | clientVersion == "2025-03-26" = Right "2025-03-26"        -- Accept latest version
-  | clientVersion == "2024-11-05" = Right "2024-11-05"        -- Accept legacy version
-  | otherwise = Left $ "Unsupported protocol version: " <> clientVersion <> ". Server supports: 2025-03-26, 2024-11-05"
+  | clientVersion == protocolVersion = Right protocolVersion  -- Exact match (2025-06-18)
+  | otherwise = Left $ "Unsupported protocol version: " <> clientVersion <> ". Server only supports: 2025-06-18"
 
 -- | Handle an MCP message and return a response if needed
 handleMcpMessage :: (MonadIO m)
@@ -198,6 +196,7 @@ handlePromptsGet handlers req =
                   let response = PromptsGetResponse
                         { promptsGetDescription = Nothing
                         , promptsGetMessages = [PromptMessage RoleUser content]
+                        , promptsGetMeta = Nothing  -- Can be extended for additional metadata
                         }
                   return $ makeSuccessResponse (requestId req) (toJSON response)
 
@@ -306,6 +305,7 @@ handleToolsCall handlers req =
                   let response = ToolsCallResponse
                         { toolsCallContent = [content]
                         , toolsCallIsError = Nothing
+                        , toolsCallMeta = Nothing  -- Can be extended for structured output
                         }
                   return $ makeSuccessResponse (requestId req) (toJSON response)
 

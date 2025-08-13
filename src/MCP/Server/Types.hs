@@ -191,26 +191,28 @@ instance ToJSON Error where
       errorMessage (MethodNotFound msg) = "Method not found: " <> msg
       errorMessage (InvalidParams msg) = "Invalid parameters: " <> msg
 
--- | Prompt definition
+-- | Prompt definition (2025-06-18 enhanced)
 data PromptDefinition = PromptDefinition
   { promptDefinitionName        :: Text
   , promptDefinitionDescription :: Text
   , promptDefinitionArguments   :: [ArgumentDefinition]
+  , promptDefinitionTitle       :: Maybe Text  -- New title field for human-friendly display
   } deriving (Show, Eq, Generic)
 
 instance ToJSON PromptDefinition where
-  toJSON def = object
+  toJSON def = object $
     [ "name" .= promptDefinitionName def
     , "description" .= promptDefinitionDescription def
     , "arguments" .= promptDefinitionArguments def
-    ]
+    ] ++ maybe [] (\t -> ["title" .= t]) (promptDefinitionTitle def)
 
--- | Resource definition
+-- | Resource definition (2025-06-18 enhanced)
 data ResourceDefinition = ResourceDefinition
   { resourceDefinitionURI         :: Text
   , resourceDefinitionName        :: Text
   , resourceDefinitionDescription :: Maybe Text
   , resourceDefinitionMimeType    :: Maybe Text
+  , resourceDefinitionTitle       :: Maybe Text  -- New title field for human-friendly display
   } deriving (Show, Eq, Generic)
 
 instance ToJSON ResourceDefinition where
@@ -219,21 +221,23 @@ instance ToJSON ResourceDefinition where
     , "name" .= resourceDefinitionName def
     ] ++
     maybe [] (\d -> ["description" .= d]) (resourceDefinitionDescription def) ++
-    maybe [] (\m -> ["mimeType" .= m]) (resourceDefinitionMimeType def)
+    maybe [] (\m -> ["mimeType" .= m]) (resourceDefinitionMimeType def) ++
+    maybe [] (\t -> ["title" .= t]) (resourceDefinitionTitle def)
 
--- | Tool definition
+-- | Tool definition (2025-06-18 enhanced)
 data ToolDefinition = ToolDefinition
   { toolDefinitionName        :: Text
   , toolDefinitionDescription :: Text
   , toolDefinitionInputSchema :: InputSchemaDefinition
+  , toolDefinitionTitle       :: Maybe Text  -- New title field for human-friendly display
   } deriving (Show, Eq, Generic)
 
 instance ToJSON ToolDefinition where
-  toJSON def = object
+  toJSON def = object $
     [ "name" .= toolDefinitionName def
     , "description" .= toolDefinitionDescription def
     , "inputSchema" .= toolDefinitionInputSchema def
-    ]
+    ] ++ maybe [] (\t -> ["title" .= t]) (toolDefinitionTitle def)
 
 -- | Argument definition for prompts
 data ArgumentDefinition = ArgumentDefinition

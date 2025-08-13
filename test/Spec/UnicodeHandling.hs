@@ -61,6 +61,7 @@ spec = describe "Unicode Handling" $ do
       let response = ToolsCallResponse
             { toolsCallContent = [ContentText "Result: √16 = 4, π ≈ 3.14159"]
             , toolsCallIsError = Nothing
+            , toolsCallMeta = Nothing  -- 2025-06-18: New _meta field
             }
       let encoded = encode response
       -- Just verify the JSON can be encoded and contains Unicode
@@ -86,6 +87,7 @@ spec = describe "Unicode Handling" $ do
       let response = ToolsCallResponse
             { toolsCallContent = [ContentText "Mathematical result: √(π²+e²) ≈ 4.53"]
             , toolsCallIsError = Nothing
+            , toolsCallMeta = Nothing  -- 2025-06-18: New _meta field
             }
       let json = toJSON response
       -- Verify the JSON can be encoded and contains Unicode
@@ -97,6 +99,7 @@ spec = describe "Unicode Handling" $ do
       let response = PromptsGetResponse
             { promptsGetDescription = Just "Mathematical formulas with symbols: ∀∃"
             , promptsGetMessages = [message]
+            , promptsGetMeta = Nothing  -- 2025-06-18: New _meta field
             }
       let json = toJSON response
       let encoded = encode json
@@ -169,6 +172,7 @@ spec = describe "Unicode Handling" $ do
               { promptDefinitionName = "math_formula"
               , promptDefinitionDescription = "Generate mathematical formulas with Unicode: ∀∃∈√"
               , promptDefinitionArguments = [ArgumentDefinition "formula" "Mathematical expression" True]
+              , promptDefinitionTitle = Nothing  -- 2025-06-18: New title field
               }
             ]
 
@@ -184,6 +188,7 @@ spec = describe "Unicode Handling" $ do
               , resourceDefinitionName = "unicode_symbols"
               , resourceDefinitionDescription = Just "Unicode mathematical symbols: ∀∃∈∉√∑"
               , resourceDefinitionMimeType = Just "text/plain"
+              , resourceDefinitionTitle = Nothing  -- 2025-06-18: New title field
               }
             ]
 
@@ -200,6 +205,7 @@ spec = describe "Unicode Handling" $ do
                   { properties = [("expression", InputSchemaDefinitionProperty "string" "Mathematical expression")]
                   , required = ["expression"]
                   }
+              , toolDefinitionTitle = Nothing  -- 2025-06-18: New title field
               }
             ]
 

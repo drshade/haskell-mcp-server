@@ -77,6 +77,7 @@ mkPromptDefWithDescription descriptions con =
           { promptDefinitionName = $(litE $ stringL $ T.unpack promptName)
           , promptDefinitionDescription = $(litE $ stringL description)
           , promptDefinitionArguments = []
+          , promptDefinitionTitle = Nothing  -- 2025-06-18: New title field
           } |]
     RecC name fields -> do
       let promptName = T.pack . toSnakeCase . nameBase $ name
@@ -89,6 +90,7 @@ mkPromptDefWithDescription descriptions con =
           { promptDefinitionName = $(litE $ stringL $ T.unpack promptName)
           , promptDefinitionDescription = $(litE $ stringL description)
           , promptDefinitionArguments = $(return $ ListE args)
+          , promptDefinitionTitle = Nothing  -- 2025-06-18: New title field
           } |]
     NormalC name [(_bang, paramType)] -> do
       -- Handle separate parameter types approach
@@ -102,6 +104,7 @@ mkPromptDefWithDescription descriptions con =
           { promptDefinitionName = $(litE $ stringL $ T.unpack promptName)
           , promptDefinitionDescription = $(litE $ stringL description)
           , promptDefinitionArguments = $(return $ ListE args)
+          , promptDefinitionTitle = Nothing  -- 2025-06-18: New title field
           } |]
     _ -> fail "Unsupported constructor type"
 
@@ -369,6 +372,7 @@ mkResourceDefWithDescription descriptions (NormalC name []) = do
           Just desc -> [| Just $(litE $ stringL desc) |]
           Nothing   -> [| Nothing |])
       , resourceDefinitionMimeType = Just "text/plain"
+      , resourceDefinitionTitle = Nothing  -- 2025-06-18: New title field
       } |]
 mkResourceDefWithDescription _ _ = fail "Unsupported constructor type for resources"
 
@@ -428,6 +432,7 @@ mkToolDefWithDescription descriptions con =
               { properties = []
               , required = []
               }
+          , toolDefinitionTitle = Nothing  -- 2025-06-18: New title field
           } |]
     RecC name fields -> do
       let toolName = T.pack . toSnakeCase . nameBase $ name
@@ -450,6 +455,7 @@ mkToolDefWithDescription descriptions con =
               { properties = $(return $ ListE props)
               , required = $(return $ ListE $ map (LitE . StringL) required)
               }
+          , toolDefinitionTitle = Nothing  -- 2025-06-18: New title field
           } |]
     NormalC name [(_bang, paramType)] -> do
       -- Handle separate parameter types approach for tools
@@ -474,6 +480,7 @@ mkToolDefWithDescription descriptions con =
               { properties = $(return $ ListE props)
               , required = $(return $ ListE $ map (LitE . StringL) required)
               }
+          , toolDefinitionTitle = Nothing  -- 2025-06-18: New title field
           } |]
     _ -> fail "Unsupported constructor type for tools"
 

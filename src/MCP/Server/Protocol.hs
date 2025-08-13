@@ -43,7 +43,7 @@ import           GHC.Generics     (Generic)
 import           MCP.Server.Types
 
 protocolVersion :: Text
-protocolVersion = "2025-03-26"
+protocolVersion = "2025-06-18"
 
 
 -- | Initialize request
@@ -146,16 +146,18 @@ instance FromJSON PromptsGetRequest where
     <$> o .: "name"
     <*> o .:? "arguments"
 
--- | Prompts get response
+-- | Prompts get response (2025-06-18 enhanced)
 data PromptsGetResponse = PromptsGetResponse
   { promptsGetDescription :: Maybe Text
   , promptsGetMessages    :: [PromptMessage]
+  , promptsGetMeta        :: Maybe Value  -- New _meta field for additional metadata
   } deriving (Show, Eq, Generic)
 
 instance ToJSON PromptsGetResponse where
   toJSON resp = object $
     [ "messages" .= promptsGetMessages resp
     ] ++ maybe [] (\d -> ["description" .= d]) (promptsGetDescription resp)
+      ++ maybe [] (\m -> ["_meta" .= m]) (promptsGetMeta resp)
 
 -- | Resources list request
 data ResourcesListRequest = ResourcesListRequest
@@ -224,16 +226,18 @@ instance FromJSON ToolsCallRequest where
     <$> o .: "name"
     <*> o .:? "arguments"
 
--- | Tools call response
+-- | Tools call response (2025-06-18 enhanced)
 data ToolsCallResponse = ToolsCallResponse
   { toolsCallContent :: [Content]
   , toolsCallIsError :: Maybe Bool
+  , toolsCallMeta :: Maybe Value  -- New _meta field for structured output
   } deriving (Show, Eq, Generic)
 
 instance ToJSON ToolsCallResponse where
   toJSON resp = object $
     [ "content" .= toolsCallContent resp
     ] ++ maybe [] (\e -> ["isError" .= e]) (toolsCallIsError resp)
+      ++ maybe [] (\m -> ["_meta" .= m]) (toolsCallMeta resp)
 
 -- | List changed notification
 data ListChangedNotification = ListChangedNotification

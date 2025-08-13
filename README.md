@@ -4,11 +4,11 @@ A fully-featured Haskell library for building [Model Context Protocol (MCP)](htt
 
 ## Features
 
-- **Complete MCP Implementation**: Supports MCP 2025-03-26 specification (with backward compatibility for 2024-11-05)
+- **Complete MCP Implementation**: Supports MCP 2025-06-18 specification
 - **Type-Safe API**: Leverage Haskell's type system for robust MCP servers
 - **Multiple Abstractions**: Both low-level fine-grained control and high-level derived interfaces
 - **Template Haskell Support**: Automatic handler derivation from data types
-- **Multiple Transports**: STDIO and HTTP Streaming transport (MCP 2025-03-26 Streamable HTTP)
+- **Multiple Transports**: STDIO and HTTP Streaming transport (MCP 2025-06-18 Streamable HTTP)
 
 ## Supported MCP Features
 
@@ -180,7 +180,7 @@ main = runMcpServerStdio serverInfo handlers
 
 ## HTTP Transport (NEW!)
 
-The library now supports MCP 2025-03-26 Streamable HTTP transport:
+The library now supports MCP 2025-06-18 Streamable HTTP transport:
 
 ```haskell
 import MCP.Server.Transport.Http
@@ -203,7 +203,7 @@ main = runMcpServerHttpWithConfig customConfig serverInfo handlers
 - CORS enabled for web clients  
 - GET `/mcp` for server discovery
 - POST `/mcp` for JSON-RPC messages
-- Full MCP 2025-03-26 compliance
+- Full MCP 2025-06-18 compliance
 
 ## Examples
 
@@ -245,7 +245,7 @@ And then configure Claude by editing `claude_desktop_config.json`:
 
 ## Documentation
 
-- [MCP Specification](https://modelcontextprotocol.io/specification/2024-11-05/)
+- [MCP Specification](https://modelcontextprotocol.io/specification/2025-06-18/)
 - [API Documentation](https://hackage.haskell.org/package/mcp-server)
 - [Examples](examples/)
 
