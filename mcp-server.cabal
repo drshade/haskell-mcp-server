@@ -15,7 +15,7 @@ name: mcp-server
 -- PVP summary:     +-+------- breaking API changes
 --                  | | +----- non-breaking API additions
 --                  | | | +--- code changes with no API change
-version: 0.1.0.16
+version: 0.1.0.17
 -- A short (one-line) description of the package.
 synopsis: Library for building Model Context Protocol (MCP) servers
 -- A longer description of the package.
@@ -45,7 +45,8 @@ build-type: Simple
 extra-doc-files:
   CHANGELOG.md
   README.md
-tested-with: GHC == 9.8.4
+tested-with: GHC == 9.6.7
+              || == 9.8.4
               || == 9.10.3
               || == 9.12.2
 
@@ -80,7 +81,7 @@ library
   -- Other library packages from which modules are imported.
   build-depends:
     aeson >=2 && <3,
-    base >=4.20 && <4.23,
+    base >=4.18 && <4.23,
     bytestring >=0.10 && <0.13,
     containers >=0.6 && <0.9,
     http-types >=0.12 && <1,
@@ -93,7 +94,7 @@ library
   -- Directories containing source files.
   hs-source-dirs: src
   -- Base language which the package is written in.
-  default-language: GHC2024
+  default-language: GHC2021
 
 executable simple-example
   -- Import common warning flags.
@@ -113,7 +114,7 @@ executable simple-example
   -- Directories containing source files.
   hs-source-dirs: examples/Simple
   -- Base language which the package is written in.
-  default-language: GHC2024
+  default-language: GHC2021
 
 executable complete-example
   -- Import common warning flags.
@@ -133,7 +134,7 @@ executable complete-example
   -- Directories containing source files.
   hs-source-dirs: examples/Complete
   -- Base language which the package is written in.
-  default-language: GHC2024
+  default-language: GHC2021
 
 executable http-simple-example
   -- Import common warning flags.
@@ -153,13 +154,13 @@ executable http-simple-example
   -- Directories containing source files.
   hs-source-dirs: examples/HttpSimple
   -- Base language which the package is written in.
-  default-language: GHC2024
+  default-language: GHC2021
 
 test-suite haskell-mcp-server-test
   -- Import common warning flags.
   import: warnings
   -- Base language which the package is written in.
-  default-language: GHC2024
+  default-language: GHC2021
   -- Modules included in this executable, other than Main.
   other-modules:
     Spec.AdvancedDerivation
