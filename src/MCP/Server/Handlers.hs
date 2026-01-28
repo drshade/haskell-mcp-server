@@ -59,10 +59,13 @@ getMessageSummary (JsonRpcMessageResponse resp) =
   "Response[" ++ show (responseId resp) ++ "]"
 
 -- | Validate protocol version and return negotiated version
+-- Per MCP spec: "If the server supports the requested protocol version,
+-- it MUST respond with the same version. Otherwise, the server MUST respond
+-- with another protocol version it supports."
 validateProtocolVersion :: Text -> Either Text Text
 validateProtocolVersion clientVersion
-  | clientVersion == protocolVersion = Right protocolVersion  -- Exact match (2025-06-18)
-  | otherwise = Left $ "Unsupported protocol version: " <> clientVersion <> ". Server only supports: 2025-06-18"
+  | clientVersion == protocolVersion = Right protocolVersion  -- Exact match
+  | otherwise = Right protocolVersion  -- Negotiate: return server's supported version
 
 -- | Handle an MCP message and return a response if needed
 handleMcpMessage :: (MonadIO m)
