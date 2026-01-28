@@ -13,7 +13,7 @@ A fully-featured Haskell library for building [Model Context Protocol (MCP)](htt
 ## Supported MCP Features
 
 - ✅ **Prompts**: User-controlled prompt templates with arguments
-- ✅ **Resources**: Application-controlled readable resources  
+- ✅ **Resources**: Application-controlled readable resources
 - ✅ **Tools**: Model-controlled callable functions
 - ✅ **Initialization Flow**: Complete protocol lifecycle with version negotiation
 - ✅ **Error Handling**: Comprehensive error types and JSON-RPC error responses
@@ -38,7 +38,7 @@ import MCP.Server.Derive
 
 -- Define your data types
 data MyPrompt = Recipe { idea :: Text } | Shopping { items :: Text }
-data MyResource = Menu | Specials  
+data MyResource = Menu | Specials
 data MyTool = Search { query :: Text } | Order { item :: Text }
 
 -- Implement handlers
@@ -46,7 +46,7 @@ handlePrompt :: MyPrompt -> IO Content
 handlePrompt (Recipe idea) = pure $ ContentText $ "Recipe for " <> idea
 handlePrompt (Shopping items) = pure $ ContentText $ "Shopping list: " <> items
 
-handleResource :: MyResource -> IO Content  
+handleResource :: MyResource -> IO Content
 handleResource Menu = pure $ ContentText "Today's menu..."
 handleResource Specials = pure $ ContentText "Daily specials..."
 
@@ -60,12 +60,12 @@ main = runMcpServerStdio serverInfo handlers
   where
     serverInfo = McpServerInfo
       { serverName = "My MCP Server"
-      , serverVersion = "1.0.0" 
+      , serverVersion = "1.0.0"
       , serverInstructions = "A sample MCP server"
       }
     handlers = McpServerHandlers
       { prompts = Just $(derivePromptHandler ''MyPrompt 'handlePrompt)
-      , resources = Just $(deriveResourceHandler ''MyResource 'handleResource)  
+      , resources = Just $(deriveResourceHandler ''MyResource 'handleResource)
       , tools = Just $(deriveToolHandler ''MyTool 'handleTool)
       }
 ```
@@ -88,7 +88,7 @@ The derivation system automatically converts Text arguments to appropriate Haske
 ```haskell
 data MyTool = Calculate { number :: Int, factor :: Double, enabled :: Bool }
 -- Text "42" -> Int 42
--- Text "3.14" -> Double 3.14  
+-- Text "3.14" -> Double 3.14
 -- Text "true" -> Bool True
 ```
 
@@ -141,7 +141,7 @@ You can provide custom descriptions for constructors and fields using the `*With
 ```haskell
 -- Define descriptions for constructors and fields
 descriptions :: [(String, String)]
-descriptions = 
+descriptions =
   [ ("Recipe", "Generate a recipe for a specific dish")     -- Constructor description
   , ("Search", "Search our menu database")                  -- Constructor description
   , ("idea", "The dish you want a recipe for")              -- Field description
@@ -174,7 +174,7 @@ main = runMcpServerStdio serverInfo handlers
     handlers = McpServerHandlers
       { prompts = Just (promptListHandler, promptGetHandler)
       , resources = Nothing  -- Not supported
-      , tools = Nothing      -- Not supported  
+      , tools = Nothing      -- Not supported
       }
 ```
 
@@ -200,7 +200,7 @@ main = runMcpServerHttpWithConfig customConfig serverInfo handlers
 ```
 
 **Features:**
-- CORS enabled for web clients  
+- CORS enabled for web clients
 - GET `/mcp` for server discovery
 - POST `/mcp` for JSON-RPC messages
 - Full MCP 2025-06-18 compliance
@@ -215,14 +215,14 @@ The library includes several examples:
 
 ## Docker Usage
 
-I like to build and publish my MCP servers to Docker - which means that it's much easier to configure assistants such as Claude Desktop to run them. 
+I like to build and publish my MCP servers to Docker - which means that it's much easier to configure assistants such as Claude Desktop to run them.
 
 ```bash
 # Build the image
 docker build -t haskell-mcp-server .
 
 # Run different examples
-docker run -i --entrypoint="/usr/local/bin/haskell-mcp-server" haskell-mcp-server
+docker run -i --entrypoint="/usr/local/bin/simple-example" haskell-mcp-server
 ```
 
 And then configure Claude by editing `claude_desktop_config.json`:
@@ -230,12 +230,12 @@ And then configure Claude by editing `claude_desktop_config.json`:
 ```json
 {
     "mcpServers": {
-       "haskell-mcp-server-example": {
+       "simple-example": {
             "command": "docker",
             "args": [
                 "run",
                 "-i",
-                "--entrypoint=/usr/local/bin/haskell-mcp-server",
+                "--entrypoint=/usr/local/bin/simple-example",
                 "haskell-mcp-server"
             ]
         }

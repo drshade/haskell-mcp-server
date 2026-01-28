@@ -20,14 +20,13 @@ COPY LICENSE /app
 RUN cabal build all --only-dependencies
 
 COPY src /app/src
-COPY app /app/app
 COPY examples /app/examples
 COPY test /app/test
 
 RUN cabal build all
 
 # Install all executables to /usr/local/bin
-RUN cabal install exe:haskell-mcp-server --installdir=/usr/local/bin
+RUN cabal install exe:http-simple-example --installdir=/usr/local/bin
 RUN cabal install exe:complete-example --installdir=/usr/local/bin
 RUN cabal install exe:simple-example --installdir=/usr/local/bin
 
@@ -41,7 +40,7 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy all binaries from builder
-COPY --from=builder /usr/local/bin/haskell-mcp-server /usr/local/bin/haskell-mcp-server
+COPY --from=builder /usr/local/bin/http-simple-example /usr/local/bin/http-simple-example
 COPY --from=builder /usr/local/bin/complete-example /usr/local/bin/complete-example
 COPY --from=builder /usr/local/bin/simple-example /usr/local/bin/simple-example
 
