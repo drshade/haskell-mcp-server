@@ -13,7 +13,7 @@ import qualified Data.ByteString.Lazy   as BSL
 import qualified Data.Text              as T
 import qualified Data.Text.Encoding     as TE
 import qualified Data.Text.IO           as TIO
-import           System.IO              (hFlush, hPutStrLn, stderr, stdout)
+import           System.IO              (hFlush, stderr, stdout)
 
 import           MCP.Server.Handlers
 import           MCP.Server.JsonRpc
@@ -52,4 +52,3 @@ transportRunStdio serverInfo handlers = do
                     liftIO $ hFlush stdout
                   Nothing -> liftIO $ TIO.hPutStrLn stderr $ "No response needed for: " <> T.pack (show (getMessageSummary message))
         loop
-

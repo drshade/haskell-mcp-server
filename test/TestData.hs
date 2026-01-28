@@ -1,22 +1,22 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module TestData 
+module TestData
   ( -- * Prompt Test Data
     promptTestCases
   , PromptTestCase(..)
-    
-    -- * Resource Test Data  
+
+    -- * Resource Test Data
   , resourceTestCases
   , ResourceTestCase(..)
-  
+
     -- * Tool Test Data
   , toolTestCases
   , ToolTestCase(..)
-  
+
     -- * Schema Test Data
   , schemaTestCases
   , SchemaTestCase(..)
-  
+
     -- * Advanced Derivation Test Data
   , separateParamsTestCases
   , recursiveParamsTestCases
@@ -34,7 +34,7 @@ data PromptTestCase = PromptTestCase
   , testDescription :: Text
   } deriving (Show, Eq)
 
--- | Test case for resource derivation  
+-- | Test case for resource derivation
 data ResourceTestCase = ResourceTestCase
   { resourceUri :: Text
   , resourceExpectedContent :: Text

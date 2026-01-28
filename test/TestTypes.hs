@@ -4,7 +4,7 @@ module TestTypes where
 
 import           Data.Text  (Text)
 import qualified Data.Text  as T
-import           MCP.Server (Content(..), ResourceContent(..), parseURI)
+import           MCP.Server (Content(..), ResourceContent(..))
 import           Network.URI (URI)
 
 -- Test data types for end-to-end testing
@@ -48,53 +48,53 @@ data RecursiveTool = ProcessData MiddleParams
 
 -- Handler functions
 handleTestPrompt :: TestPrompt -> IO Content
-handleTestPrompt (SimplePrompt msg) = 
+handleTestPrompt (SimplePrompt msg) =
     pure $ ContentText $ "Simple prompt: " <> msg
-handleTestPrompt (ComplexPrompt title prio urgent) = 
+handleTestPrompt (ComplexPrompt title prio urgent) =
     pure $ ContentText $ "Complex prompt: " <> title <> " (priority=" <> T.pack (show prio) <> ", urgent=" <> T.pack (show urgent) <> ")"
-handleTestPrompt (OptionalPrompt req opt) = 
+handleTestPrompt (OptionalPrompt req opt) =
     pure $ ContentText $ "Optional prompt: " <> req <> maybe "" ((" optional=" <>) . T.pack . show) opt
 
 handleTestResource :: URI -> TestResource -> IO ResourceContent
-handleTestResource uri ConfigFile = 
+handleTestResource uri ConfigFile =
     pure $ ResourceText uri "text/plain" "Config file contents: debug=true, timeout=30"
-handleTestResource uri DatabaseConnection = 
+handleTestResource uri DatabaseConnection =
     pure $ ResourceText uri "text/plain" "Database at localhost:5432"
-handleTestResource uri UserProfile = 
+handleTestResource uri UserProfile =
     pure $ ResourceText uri "text/plain" "User profile for ID 123"
 
 handleTestTool :: TestTool -> IO Content
-handleTestTool (Echo text) = 
+handleTestTool (Echo text) =
     pure $ ContentText $ "Echo: " <> text
-handleTestTool (Calculate op x y) = 
+handleTestTool (Calculate op x y) =
     let result = case op of
             "add" -> x + y
             "multiply" -> x * y
             "subtract" -> x - y
             _ -> 0
     in pure $ ContentText $ T.pack (show result)
-handleTestTool (Toggle flag) = 
+handleTestTool (Toggle flag) =
     pure $ ContentText $ "Flag is now: " <> T.pack (show (not flag))
-handleTestTool (Search query limit caseSens) = 
+handleTestTool (Search query limit caseSens) =
     pure $ ContentText $ "Search results for '" <> query <> "'" <>
         maybe "" ((" (limit=" <>) . (<> ")") . T.pack . show) limit <>
         maybe "" ((" (case-sensitive=" <>) . (<> ")") . T.pack . show) caseSens
 
 -- Handler for separate params tool
 handleSeparateParamsTool :: SeparateParamsTool -> IO Content
-handleSeparateParamsTool (GetValue (GetValueParams key)) = 
+handleSeparateParamsTool (GetValue (GetValueParams key)) =
     pure $ ContentText $ "Getting value for key: " <> key
-handleSeparateParamsTool (SetValue (SetValueParams key value)) = 
+handleSeparateParamsTool (SetValue (SetValueParams key value)) =
     pure $ ContentText $ "Setting " <> key <> " = " <> value
 
 -- Handler for recursive tool
 handleRecursiveTool :: RecursiveTool -> IO Content
-handleRecursiveTool (ProcessData (MiddleParams (InnerParams name age))) = 
+handleRecursiveTool (ProcessData (MiddleParams (InnerParams name age))) =
     pure $ ContentText $ "Processing data for " <> name <> " (age " <> T.pack (show age) <> ")"
 
 -- Test descriptions for custom description functionality
 testDescriptions :: [(String, String)]
-testDescriptions = 
+testDescriptions =
     [ ("Echo", "Echoes the input text back to the user")
     , ("Calculate", "Performs mathematical calculations")
     , ("text", "The text to echo back")
@@ -105,7 +105,7 @@ testDescriptions =
 
 -- Test descriptions for separate parameter types
 separateParamsDescriptions :: [(String, String)]
-separateParamsDescriptions = 
+separateParamsDescriptions =
     [ ("GetValue", "Retrieves a value from the key-value store")
     , ("SetValue", "Sets a value in the key-value store")
     , ("_gvpKey", "The key to retrieve the value for")
