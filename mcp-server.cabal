@@ -45,6 +45,9 @@ build-type: Simple
 extra-doc-files:
   CHANGELOG.md
   README.md
+tested-with: GHC == 9.8.4
+              || == 9.10.3
+              || == 9.12.2
 
 -- Extra source files to be distributed with the package, such as examples, or a tutorial module.
 -- extra-source-files: SPEC.md
