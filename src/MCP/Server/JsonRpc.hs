@@ -9,7 +9,7 @@ module MCP.Server.JsonRpc
   , JsonRpcNotification(..)
   , JsonRpcMessage(..)
   , RequestId(..)
-  
+
     -- * JSON-RPC Functions
   , makeSuccessResponse
   , makeErrorResponse
@@ -95,7 +95,7 @@ instance ToJSON JsonRpcResponse where
   toJSON resp = object $
     [ "jsonrpc" .= responseJsonrpc resp
     , "id" .= responseId resp
-    ] ++ 
+    ] ++
     maybe [] (\r -> ["result" .= r]) (responseResult resp) ++
     maybe [] (\e -> ["error" .= e]) (responseError resp)
 

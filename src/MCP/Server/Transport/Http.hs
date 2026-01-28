@@ -78,7 +78,7 @@ handleMcpRequest config serverInfo handlers req respond = do
         status400
         [("Content-Type", "application/json")]
         (encode $ object ["error" .= ("Missing required MCP-Protocol-Version header" :: Text)])
-    Just headerValue -> 
+    Just headerValue ->
       if TE.decodeUtf8 headerValue /= "2025-06-18" then do
         logVerbose config $ "Request rejected: Invalid protocol version: " ++ show headerValue
         respond $ Wai.responseLBS
@@ -168,9 +168,7 @@ handleSingleJsonRpc config serverInfo handlers jsonValue respond = do
         Nothing -> do
           logVerbose config $ "No response needed for: " ++ show (getMessageSummary message)
           -- For notifications, return 200 with empty JSON object (per MCP spec)
-          respond $ Wai.responseLBS 
-            status200 
-            [("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*")] 
+          respond $ Wai.responseLBS
+            status200
+            [("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*")]
             "{}"
-
-

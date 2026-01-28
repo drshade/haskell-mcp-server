@@ -5,7 +5,7 @@ module MCP.Server.Handlers
   ( -- * Core Message Handling
     handleMcpMessage
   , jsonValueToText
-  
+
     -- * Individual Request Handlers
   , handleInitialize
   , handlePing
@@ -15,11 +15,11 @@ module MCP.Server.Handlers
   , handleResourcesRead
   , handleToolsList
   , handleToolsCall
-  
+
     -- * Protocol Support
   , validateProtocolVersion
   , getMessageSummary
-  
+
     -- * Error Conversion
   , errorCodeFromMcpError
   , errorMessageFromMcpError
@@ -39,7 +39,7 @@ import           MCP.Server.Types
 -- | Convert JSON Value to Text representation suitable for handlers
 jsonValueToText :: Value -> Text
 jsonValueToText (String t) = t
-jsonValueToText (Number n) = 
+jsonValueToText (Number n) =
     -- Check if it's a whole number, if so format as integer
     if fromInteger (round n) == n
         then T.pack $ show (round n :: Integer)
@@ -51,11 +51,11 @@ jsonValueToText v = T.pack $ show v
 
 -- | Extract a brief summary of a JSON-RPC message for logging
 getMessageSummary :: JsonRpcMessage -> String
-getMessageSummary (JsonRpcMessageRequest req) = 
+getMessageSummary (JsonRpcMessageRequest req) =
   "Request[" ++ show (requestId req) ++ "] " ++ T.unpack (requestMethod req)
-getMessageSummary (JsonRpcMessageNotification notif) = 
+getMessageSummary (JsonRpcMessageNotification notif) =
   "Notification " ++ T.unpack (notificationMethod notif)
-getMessageSummary (JsonRpcMessageResponse resp) = 
+getMessageSummary (JsonRpcMessageResponse resp) =
   "Response[" ++ show (responseId resp) ++ "]"
 
 -- | Validate protocol version and return negotiated version

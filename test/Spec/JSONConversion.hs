@@ -2,7 +2,7 @@
 
 module Spec.JSONConversion (spec) where
 
-import Data.Aeson (Value(..), toJSON)
+import Data.Aeson (toJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
 import MCP.Server
@@ -18,7 +18,7 @@ spec :: Spec
 spec = describe "JSON Type Conversion" $ do
   describe "Property-based tests" $ do
     it "round-trips integers correctly" $ property prop_intRoundTrip
-    it "round-trips booleans correctly" $ property prop_boolRoundTrip  
+    it "round-trips booleans correctly" $ property prop_boolRoundTrip
     it "round-trips text correctly" $ property prop_textRoundTrip
 
   describe "Manual conversion tests" $ do
@@ -27,14 +27,14 @@ spec = describe "JSON Type Conversion" $ do
 
 -- Fixed property-based tests (no more 'error' usage)
 prop_intRoundTrip :: Int -> Bool
-prop_intRoundTrip i = 
+prop_intRoundTrip i =
     let jsonVal = toJSON i
         textVal = jsonValueToText jsonVal
         parsed = readMaybe (T.unpack textVal)
     in parsed == Just i
 
 prop_boolRoundTrip :: Bool -> Bool
-prop_boolRoundTrip b = 
+prop_boolRoundTrip b =
     let jsonVal = toJSON b
         textVal = jsonValueToText jsonVal
         parsed = case T.toLower textVal of
@@ -44,7 +44,7 @@ prop_boolRoundTrip b =
     in parsed == Just b
 
 prop_textRoundTrip :: Text -> Bool
-prop_textRoundTrip t = 
+prop_textRoundTrip t =
     let jsonVal = toJSON t
         textVal = jsonValueToText jsonVal
     in textVal == t

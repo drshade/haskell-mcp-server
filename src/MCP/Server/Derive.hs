@@ -61,11 +61,11 @@ derivePromptHandlerWithDescription typeName handlerName descriptions = do
 -- | Derive prompt handlers from a data type
 -- Usage: $(derivePromptHandler ''MyPrompt 'handlePrompt)
 derivePromptHandler :: Name -> Name -> Q Exp
-derivePromptHandler typeName handlerName = 
+derivePromptHandler typeName handlerName =
   derivePromptHandlerWithDescription typeName handlerName []
 
 mkPromptDefWithDescription :: [(String, String)] -> Con -> Q Exp
-mkPromptDefWithDescription descriptions con = 
+mkPromptDefWithDescription descriptions con =
   case con of
     NormalC name [] -> do
       let promptName = T.pack . toSnakeCase . nameBase $ name
@@ -171,7 +171,7 @@ mkSeparateParamsCase conName handlerName paramType = do
       [| do
           content <- $(varE handlerName') $(return outerConstructorApp)
           pure $ Right content |]
-    
+
     buildNestedFieldValidationWithConstructor outerConName handlerName' paramType' ((fieldName, _, fieldType):remainingFields) depth = do
       let fieldStr = nameBase fieldName
       let (isOptional, innerType) = case fieldType of
@@ -231,9 +231,9 @@ extractFieldsFromParamType paramType = do
     ConT typeName -> do
       info <- reify typeName
       case info of
-        TyConI (DataD _ _ _ _ [RecC _ fields] _) -> 
+        TyConI (DataD _ _ _ _ [RecC _ fields] _) ->
           return fields
-        TyConI (DataD _ _ _ _ [NormalC _ [(_bang, innerType)]] _) -> 
+        TyConI (DataD _ _ _ _ [NormalC _ [(_bang, innerType)]] _) ->
           extractFieldsFromParamType innerType
         _ -> fail $ "Parameter type " ++ show typeName ++ " must be a record type or single-parameter constructor"
     _ -> fail $ "Parameter type must be a concrete type, got: " ++ show paramType
@@ -354,7 +354,7 @@ deriveResourceHandlerWithDescription typeName handlerName descriptions = do
 -- | Derive resource handlers from a data type
 -- Usage: $(deriveResourceHandler ''MyResource 'handleResource)
 deriveResourceHandler :: Name -> Name -> Q Exp
-deriveResourceHandler typeName handlerName = 
+deriveResourceHandler typeName handlerName =
   deriveResourceHandlerWithDescription typeName handlerName []
 
 mkResourceDefWithDescription :: [(String, String)] -> Con -> Q Exp
@@ -413,11 +413,11 @@ deriveToolHandlerWithDescription typeName handlerName descriptions = do
 -- | Derive tool handlers from a data type
 -- Usage: $(deriveToolHandler ''MyTool 'handleTool)
 deriveToolHandler :: Name -> Name -> Q Exp
-deriveToolHandler typeName handlerName = 
+deriveToolHandler typeName handlerName =
   deriveToolHandlerWithDescription typeName handlerName []
 
 mkToolDefWithDescription :: [(String, String)] -> Con -> Q Exp
-mkToolDefWithDescription descriptions con = 
+mkToolDefWithDescription descriptions con =
   case con of
     NormalC name [] -> do
       let toolName = T.pack . toSnakeCase . nameBase $ name

@@ -17,7 +17,6 @@ module MCP.Server
   , module MCP.Server.Types
   ) where
 
-import           Control.Monad.IO.Class (MonadIO)
 import           Data.Aeson
 import           Data.Text              (Text)
 import qualified Data.Text              as T
@@ -29,7 +28,7 @@ import           MCP.Server.Types
 -- | Convert JSON Value to Text representation suitable for handlers
 jsonValueToText :: Value -> Text
 jsonValueToText (String t) = t
-jsonValueToText (Number n) = 
+jsonValueToText (Number n) =
     -- Check if it's a whole number, if so format as integer
     if fromInteger (round n) == n
         then T.pack $ show (round n :: Integer)
@@ -50,4 +49,3 @@ runMcpServerHttp serverInfo handlers = transportRunHttp defaultHttpConfig server
 -- | Run an MCP server using HTTP transport with custom configuration
 runMcpServerHttpWithConfig :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> IO ()
 runMcpServerHttpWithConfig config serverInfo handlers = transportRunHttp config serverInfo handlers
-

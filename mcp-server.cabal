@@ -54,7 +54,7 @@ source-repository head
   location: https://github.com/drshade/haskell-mcp-server.git
 
 common warnings
-  ghc-options: -Wall
+  ghc-options: -Wall -Wunused-packages
 
 library
   -- Import common warning flags.
@@ -77,41 +77,18 @@ library
   -- Other library packages from which modules are imported.
   build-depends:
     aeson >=2 && <3,
-    base >=4.20 && <4.22,
+    base >=4.20 && <4.23,
     bytestring >=0.10 && <0.13,
     containers >=0.6 && <0.9,
     http-types >=0.12 && <1,
     network-uri >=2.6 && <2.8,
     template-haskell >=2.16 && <2.25,
     text >=1.2 && <3,
-    vector >=0.12 && <1,
     wai >=3.2 && <4,
     warp >=3.3 && <4,
 
   -- Directories containing source files.
   hs-source-dirs: src
-  -- Base language which the package is written in.
-  default-language: GHC2024
-
-executable haskell-mcp-server
-  -- Import common warning flags.
-  import: warnings
-  -- .hs or .lhs file containing the Main module.
-  main-is: Main.hs
-  -- Modules included in this executable, other than Main.
-  -- other-modules:
-  -- LANGUAGE extensions used by modules in this package.
-  -- other-extensions:
-  -- Other library packages from which modules are imported.
-  build-depends:
-    base,
-    containers,
-    mcp-server,
-    network-uri,
-    text,
-
-  -- Directories containing source files.
-  hs-source-dirs: app
   -- Base language which the package is written in.
   default-language: GHC2024
 
@@ -204,9 +181,7 @@ test-suite haskell-mcp-server-test
     aeson,
     base,
     bytestring,
-    containers,
     hspec,
     mcp-server,
     network-uri,
-    template-haskell,
     text,
