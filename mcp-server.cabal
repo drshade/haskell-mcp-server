@@ -162,6 +162,7 @@ test-suite haskell-mcp-server-test
     Spec.AdvancedDerivation
     Spec.BasicDerivation
     Spec.JSONConversion
+    Spec.ProtocolVersionNegotiation
     Spec.SchemaValidation
     Spec.UnicodeHandling
     TestData
