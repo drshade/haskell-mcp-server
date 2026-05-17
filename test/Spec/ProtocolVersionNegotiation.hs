@@ -112,3 +112,42 @@ spec = describe "Protocol Version Negotiation" $ do
               Just other -> expectationFailure $ "protocolVersion is not a string: " ++ show other
               Nothing -> expectationFailure "Response missing protocolVersion"
           Just other -> expectationFailure $ "Result is not an object: " ++ show other
+
+  it "Server should echo back older compatible version instead of responding with a newer one" $ do
+    -- Claude Code sends "2024-11-05". Per MCP spec the server MUST respond
+    -- with a version <= what the client proposed, because the client cannot
+    -- be expected to understand a protocol version newer than what it asked for.
+    -- The 2024-11-05 wire format is compatible with 2025-06-18 for basic
+    -- tool/resource/prompt operations, so the server should accept it.
+    let params = object
+          [ "protocolVersion" .= String "2024-11-05"  -- Older version (Claude Code)
+          , "capabilities" .= object []
+          , "clientInfo" .= object
+              [ "name" .= String "claude-code"
+              , "version" .= String "2.1.66"
+              ]
+          ]
+        request = JsonRpcRequest
+          { requestJsonrpc = "2.0"
+          , requestId = RequestIdNumber 0
+          , requestMethod = "initialize"
+          , requestParams = Just params
+          }
+
+    response <- handleInitialize testServerInfo request
+
+    case responseError response of
+      Just err -> expectationFailure $ "Unexpected error: " ++ show (errorMessage err)
+      Nothing -> do
+        case responseResult response of
+          Nothing -> expectationFailure "Response has no result"
+          Just (Object result) -> do
+            case KM.lookup "protocolVersion" result of
+              Just (String version) -> do
+                -- Server must NOT respond with a version newer than what
+                -- the client proposed. Responding with "2025-06-18" when
+                -- client sent "2024-11-05" causes the client to disconnect.
+                version `shouldBe` "2024-11-05"
+              Just other -> expectationFailure $ "protocolVersion is not a string: " ++ show other
+              Nothing -> expectationFailure "Response missing protocolVersion"
+          Just other -> expectationFailure $ "Result is not an object: " ++ show other
