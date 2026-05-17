@@ -58,14 +58,28 @@ getMessageSummary (JsonRpcMessageNotification notif) =
 getMessageSummary (JsonRpcMessageResponse resp) =
   "Response[" ++ show (responseId resp) ++ "]"
 
--- | Validate protocol version and return negotiated version
--- Per MCP spec: "If the server supports the requested protocol version,
--- it MUST respond with the same version. Otherwise, the server MUST respond
--- with another protocol version it supports."
+-- | Validate protocol version and return negotiated version.
+--
+-- Per MCP spec the server must respond with a version it supports that is
+-- less than or equal to the client's proposed version. Responding with a
+-- NEWER version causes well-behaved clients (e.g. Claude Code) to disconnect,
+-- since they cannot be expected to understand a protocol they haven't
+-- implemented yet.
+--
+-- Known compatible older versions are echoed back verbatim because the wire
+-- format for basic tool\/resource\/prompt operations has not changed.
 validateProtocolVersion :: Text -> Either Text Text
 validateProtocolVersion clientVersion
-  | clientVersion == protocolVersion = Right protocolVersion  -- Exact match
-  | otherwise = Right protocolVersion  -- Negotiate: return server's supported version
+  | clientVersion == protocolVersion = Right protocolVersion    -- Exact match
+  | clientVersion `elem` compatibleOlderVersions = Right clientVersion  -- Compatible older version
+  | otherwise = Right protocolVersion                          -- Unknown: best-effort
+
+-- | Older protocol versions whose wire format is compatible with ours
+-- for basic operations (tools, resources, prompts).
+compatibleOlderVersions :: [Text]
+compatibleOlderVersions =
+  [ "2024-11-05"  -- Used by Claude Code; wire-compatible for tool/resource/prompt calls
+  ]
 
 -- | Handle an MCP message and return a response if needed
 handleMcpMessage :: (MonadIO m)
