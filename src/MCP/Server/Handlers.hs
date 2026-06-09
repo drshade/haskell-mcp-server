@@ -58,14 +58,36 @@ getMessageSummary (JsonRpcMessageNotification notif) =
 getMessageSummary (JsonRpcMessageResponse resp) =
   "Response[" ++ show (responseId resp) ++ "]"
 
--- | Validate protocol version and return negotiated version
--- Per MCP spec: "If the server supports the requested protocol version,
--- it MUST respond with the same version. Otherwise, the server MUST respond
--- with another protocol version it supports."
+-- | Validate protocol version and return negotiated version.
+--
+-- Per MCP spec: "If the server supports the requested protocol version, it MUST
+-- respond with the same version. Otherwise, the server MUST respond with
+-- another protocol version it supports."
+--
+-- The wire format for the basic tool\/resource\/prompt operations exposed by
+-- this library has not changed across the date-versioned protocol revisions, so
+-- any version the client explicitly proposes from 'compatibleVersions' is echoed
+-- back verbatim. This satisfies clients (e.g. Claude Code) that request a newer
+-- revision than this library's nominal 'protocolVersion' and would otherwise
+-- warn about an unsupported version. Unknown versions fall back to the server's
+-- own 'protocolVersion'.
 validateProtocolVersion :: Text -> Either Text Text
 validateProtocolVersion clientVersion
-  | clientVersion == protocolVersion = Right protocolVersion  -- Exact match
-  | otherwise = Right protocolVersion  -- Negotiate: return server's supported version
+  | clientVersion == protocolVersion          = Right protocolVersion  -- Exact match
+  | clientVersion `elem` compatibleVersions    = Right clientVersion    -- Wire-compatible: echo back
+  | otherwise                                  = Right protocolVersion  -- Unknown: best-effort
+
+-- | Protocol revisions whose wire format is compatible with this library's
+-- implementation for basic tool\/resource\/prompt operations. The client's
+-- proposed version is echoed back when it appears here, so the negotiated
+-- version matches what the client asked for.
+compatibleVersions :: [Text]
+compatibleVersions =
+  [ "2024-11-05"
+  , "2025-03-26"
+  , "2025-06-18"
+  , "2025-11-25"
+  ]
 
 -- | Handle an MCP message and return a response if needed
 handleMcpMessage :: (MonadIO m)
