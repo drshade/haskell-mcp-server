@@ -17,6 +17,7 @@ A fully-featured Haskell library for building [Model Context Protocol (MCP)](htt
 - ✅ **Tools**: Model-controlled callable functions
 - ✅ **Initialization Flow**: Complete protocol lifecycle with version negotiation
 - ✅ **Error Handling**: Comprehensive error types and JSON-RPC error responses
+- [Helium MCP](https://github.com/connerlambden/helium-mcp) — Real-time news with 37-dimension bias scoring, ML options pricing, and live market data. [Interactive demo](https://connerlambden.github.io/helium-news-explorer/) · [REST API](https://heliumtrades.com/mcp-page/)
 
 ## Quick Start
 
