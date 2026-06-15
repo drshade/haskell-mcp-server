@@ -64,8 +64,8 @@ getMessageSummary (JsonRpcMessageResponse resp) =
 -- with another protocol version it supports."
 validateProtocolVersion :: Text -> Either Text Text
 validateProtocolVersion clientVersion
-  | clientVersion == protocolVersion = Right protocolVersion  -- Exact match
-  | otherwise = Right protocolVersion  -- Negotiate: return server's supported version
+  | clientVersion `elem` supportedVersions = Right clientVersion  -- Supported: echo the client's own version
+  | otherwise = Right protocolVersion  -- Unknown: negotiate down to the server's default version
 
 -- | Handle an MCP message and return a response if needed
 handleMcpMessage :: (MonadIO m)
