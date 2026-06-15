@@ -22,9 +22,10 @@ import           System.IO                (hPutStrLn, stderr)
 
 import           MCP.Server.Handlers
 import           MCP.Server.JsonRpc
+import           MCP.Server.Protocol (protocolVersion, supportedVersions)
 import           MCP.Server.Types
 
--- | HTTP transport configuration following MCP 2025-06-18 Streamable HTTP specification
+-- | HTTP transport configuration following the MCP Streamable HTTP specification
 data HttpConfig = HttpConfig
   { httpPort     :: Int      -- ^ Port to listen on
   , httpHost     :: String   -- ^ Host to bind to (default "localhost")
@@ -70,7 +71,7 @@ mcpApplication config serverInfo handlers req respond = do
 -- | Handle MCP requests according to Streamable HTTP specification
 handleMcpRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 handleMcpRequest config serverInfo handlers req respond = do
-  -- Check for mandatory MCP-Protocol-Version header (2025-06-18 requirement)
+  -- Check for mandatory MCP-Protocol-Version header (required since 2025-06-18)
   case lookup "MCP-Protocol-Version" (Wai.requestHeaders req) of
     Nothing -> do
       logVerbose config "Request rejected: Missing MCP-Protocol-Version header"
@@ -79,12 +80,12 @@ handleMcpRequest config serverInfo handlers req respond = do
         [("Content-Type", "application/json")]
         (encode $ object ["error" .= ("Missing required MCP-Protocol-Version header" :: Text)])
     Just headerValue ->
-      if TE.decodeUtf8 headerValue /= "2025-06-18" then do
+      if TE.decodeUtf8 headerValue `notElem` supportedVersions then do
         logVerbose config $ "Request rejected: Invalid protocol version: " ++ show headerValue
         respond $ Wai.responseLBS
           status400
           [("Content-Type", "application/json")]
-          (encode $ object ["error" .= ("Unsupported protocol version. Server only supports 2025-06-18" :: Text)])
+          (encode $ object ["error" .= ("Unsupported protocol version. Supported versions: " <> T.intercalate ", " supportedVersions)])
       else
         case Wai.requestMethod req of
           -- GET requests for endpoint discovery
@@ -93,7 +94,7 @@ handleMcpRequest config serverInfo handlers req respond = do
                   [ "name" .= serverName serverInfo
                   , "version" .= serverVersion serverInfo
                   , "description" .= serverInstructions serverInfo
-                  , "protocolVersion" .= ("2025-06-18" :: Text)
+                  , "protocolVersion" .= protocolVersion
                   , "capabilities" .= object
                       [ "tools" .= object []
                       , "prompts" .= object []

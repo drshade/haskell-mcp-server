@@ -34,6 +34,7 @@ module MCP.Server.Protocol
 
     -- * Protocol Functions
   , protocolVersion
+  , supportedVersions
   ) where
 
 import           Data.Aeson
@@ -42,8 +43,25 @@ import           Data.Text        (Text)
 import           GHC.Generics     (Generic)
 import           MCP.Server.Types
 
+-- | The protocol revision the server advertises by default. Used as the
+-- fallback when a client proposes a version this library does not recognise.
 protocolVersion :: Text
-protocolVersion = "2025-06-18"
+protocolVersion = "2025-11-25"
+
+-- | Date-versioned MCP revisions whose wire format for the basic
+-- tool/resource/prompt operations this library implements is identical.
+-- The server echoes back any of these a client proposes (see
+-- 'MCP.Server.Handlers.validateProtocolVersion'), satisfying the spec
+-- requirement that a supported version be answered with the same version.
+--
+-- Ordered newest-first.
+supportedVersions :: [Text]
+supportedVersions =
+  [ "2025-11-25"
+  , "2025-06-18"
+  , "2025-03-26"
+  , "2024-11-05"
+  ]
 
 
 -- | Initialize request
