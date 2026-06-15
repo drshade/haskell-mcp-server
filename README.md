@@ -243,6 +243,120 @@ And then configure Claude by editing `claude_desktop_config.json`:
 }
 ```
 
+## Using with Claude Code
+
+[Claude Code](https://docs.claude.com/en/docs/claude-code) is an MCP client, so
+any server you build with this library plugs straight in. Pick whichever of the
+three setups matches how you run the server, then verify with `/mcp` inside a
+Claude Code session.
+
+### Option A — local binary over STDIO (simplest)
+
+Build the server, then point Claude Code at the binary. `cabal list-bin` prints
+the path to a built executable:
+
+```bash
+cabal build
+claude mcp add kv-store -- "$(cabal list-bin exe:simple-example)"
+```
+
+Or install it onto your `PATH` and reference it by name:
+
+```bash
+cabal install exe:simple-example
+claude mcp add kv-store -- simple-example
+```
+
+Everything after `--` is the command Claude Code spawns; pass server arguments
+there too. Use `--env KEY=value` (repeatable) for environment variables.
+
+### Option B — Docker over STDIO
+
+Reuse the image from [Docker Usage](#docker-usage) above — Claude Code runs the
+container the same way Claude Desktop does:
+
+```bash
+claude mcp add kv-store -- \
+  docker run -i --entrypoint=/usr/local/bin/simple-example haskell-mcp-server
+```
+
+### Option C — HTTP (Streamable HTTP)
+
+Start the HTTP example (defaults to `localhost:3000/mcp`) and register the URL:
+
+```bash
+cabal run http-simple-example
+# in another shell:
+claude mcp add --transport http kv-store http://localhost:3000/mcp
+```
+
+### Scopes — who sees the server
+
+`claude mcp add` writes to a scope chosen with `--scope` (default `local`):
+
+| Scope            | Stored in        | Use for                                            |
+| ---------------- | ---------------- | -------------------------------------------------- |
+| `local` (default)| `~/.claude.json` | Private to you, this project only                  |
+| `user`           | `~/.claude.json` | Private to you, across all your projects           |
+| `project`        | `.mcp.json`      | Shared with your team — commit it to the repo      |
+
+### Sharing with your team via `.mcp.json`
+
+For `--scope project`, Claude Code reads a checked-in `.mcp.json` at the repo
+root. A STDIO server:
+
+```json
+{
+  "mcpServers": {
+    "kv-store": {
+      "type": "stdio",
+      "command": "docker",
+      "args": ["run", "-i", "--entrypoint=/usr/local/bin/simple-example", "haskell-mcp-server"]
+    }
+  }
+}
+```
+
+An HTTP server:
+
+```json
+{
+  "mcpServers": {
+    "kv-store": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
+
+`${VAR}` and `${VAR:-default}` are expanded at runtime in `command`, `args`,
+`env`, `url`, and `headers`.
+
+### Verify & manage
+
+```bash
+claude mcp list           # show configured servers and connection status
+claude mcp get kv-store   # details for one server
+claude mcp remove kv-store
+```
+
+Inside a session, run `/mcp` to see live connection status, the tools each
+server exposes, and any connection errors. Project-scoped servers prompt for
+approval the first time.
+
+### Troubleshooting
+
+- **STDIO servers must keep `stdout` clean** — only JSON-RPC messages may go to
+  `stdout`; anything else corrupts the stream. This library already routes all
+  diagnostics to `stderr` (`runMcpServerStdio` writes only protocol responses to
+  `stdout`), so your own handlers should do the same: log to `stderr`, never
+  `putStrLn`.
+- **Tools not appearing?** Run `claude mcp get <name>` and `/mcp` to inspect the
+  connection. Server `stderr` surfaces in Claude Code's MCP error output.
+- **HTTP debugging** — set `httpVerbose = True` in `HttpConfig` for detailed
+  request/response logging on `stderr`.
+
 ## Documentation
 
 - [MCP Specification](https://modelcontextprotocol.io/specification/2025-06-18/)
