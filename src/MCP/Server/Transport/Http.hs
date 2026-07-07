@@ -10,6 +10,7 @@ module MCP.Server.Transport.Http
 
 import           Control.Monad            (when)
 import           Data.Aeson
+import qualified Data.Aeson.KeyMap        as KM
 import qualified Data.ByteString.Lazy     as BSL
 import           Data.String              (IsString (fromString))
 import           Data.Text                (Text)
@@ -71,22 +72,21 @@ mcpApplication config serverInfo handlers req respond = do
 -- | Handle MCP requests according to Streamable HTTP specification
 handleMcpRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 handleMcpRequest config serverInfo handlers req respond = do
-  -- Check for mandatory MCP-Protocol-Version header (required since 2025-06-18)
-  case lookup "MCP-Protocol-Version" (Wai.requestHeaders req) of
-    Nothing -> do
-      logVerbose config "Request rejected: Missing MCP-Protocol-Version header"
+  -- Read the POST body up front so we can identify the `initialize` request:
+  -- it negotiates the protocol version in its *body*, so (per the Streamable
+  -- HTTP spec, which scopes the MCP-Protocol-Version header to "subsequent
+  -- requests") it is exempt from the header check. For any other request a
+  -- *missing* header is accepted, while a *present but unsupported* one is
+  -- rejected with 400.
+  body <- if Wai.requestMethod req == "POST" then Wai.strictRequestBody req else pure ""
+  if extractMethod body /= Just "initialize" && not (versionHeaderSupported req)
+    then do
+      logVerbose config "Request rejected: unsupported MCP-Protocol-Version header"
       respond $ Wai.responseLBS
         status400
         [("Content-Type", "application/json")]
-        (encode $ object ["error" .= ("Missing required MCP-Protocol-Version header" :: Text)])
-    Just headerValue ->
-      if TE.decodeUtf8 headerValue `notElem` supportedVersions then do
-        logVerbose config $ "Request rejected: Invalid protocol version: " ++ show headerValue
-        respond $ Wai.responseLBS
-          status400
-          [("Content-Type", "application/json")]
-          (encode $ object ["error" .= ("Unsupported protocol version. Supported versions: " <> T.intercalate ", " supportedVersions)])
-      else
+        (encode $ object ["error" .= ("Unsupported protocol version. Supported versions: " <> T.intercalate ", " supportedVersions)])
+    else
         case Wai.requestMethod req of
           -- GET requests for endpoint discovery
           "GET" -> do
@@ -109,8 +109,6 @@ handleMcpRequest config serverInfo handlers req respond = do
 
           -- POST requests for JSON-RPC messages
           "POST" -> do
-            -- Read request body
-            body <- Wai.strictRequestBody req
             logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
             handleJsonRpcRequest config serverInfo handlers body respond
 
@@ -128,6 +126,23 @@ handleMcpRequest config serverInfo handlers req respond = do
             status405
             [("Content-Type", "text/plain"), ("Allow", "GET, POST, OPTIONS")]
             "Method Not Allowed"
+
+-- | True unless the request carries a *present but unsupported*
+-- MCP-Protocol-Version header. A missing header is treated as acceptable, since
+-- the spec allows the server to assume a default protocol version in that case.
+versionHeaderSupported :: Wai.Request -> Bool
+versionHeaderSupported req =
+  case lookup "MCP-Protocol-Version" (Wai.requestHeaders req) of
+    Nothing -> True
+    Just hv -> TE.decodeUtf8 hv `elem` supportedVersions
+
+-- | Peek at a JSON-RPC message body to read its @method@ (if present).
+extractMethod :: BSL.ByteString -> Maybe Text
+extractMethod body = case decode body of
+  Just (Object o) -> case KM.lookup "method" o of
+    Just (String m) -> Just m
+    _               -> Nothing
+  _ -> Nothing
 
 -- | Handle JSON-RPC request from HTTP body
 handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
