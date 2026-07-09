@@ -26,6 +26,7 @@ module MCP.Server.Types
     -- * Server Types
   , McpServerInfo(..)
   , McpServerHandlers(..)
+  , ClientContext(..)
   , ServerCapabilities(..)
   , PromptCapabilities(..)
   , ResourceCapabilities(..)
@@ -338,15 +339,26 @@ instance ToJSON ServerCapabilities where
     ]
 
 
--- | Handler type definitions
-type PromptListHandler m = m [PromptDefinition]
-type PromptGetHandler m = PromptName -> [(ArgumentName, ArgumentValue)] -> m (Either Error Content)
+-- | Per-request context passed to every handler, so handlers can behave
+-- differently depending on who is calling.
+data ClientContext = ClientContext
+  { clientToken     :: Maybe Text   -- ^ Authenticated bearer token, if any.
+  , clientPrincipal :: Maybe Value  -- ^ Application-defined principal returned by
+                                    --   the transport's authorization callback
+                                    --   (e.g. a role). 'Nothing' when
+                                    --   authentication is disabled.
+  } deriving (Show, Eq)
 
-type ResourceListHandler m = m [ResourceDefinition]
-type ResourceReadHandler m = URI -> m (Either Error ResourceContent)
+-- | Handler type definitions. Every handler receives the request's
+-- 'ClientContext' as its first argument.
+type PromptListHandler m = ClientContext -> m [PromptDefinition]
+type PromptGetHandler m = ClientContext -> PromptName -> [(ArgumentName, ArgumentValue)] -> m (Either Error Content)
 
-type ToolListHandler m = m [ToolDefinition]
-type ToolCallHandler m = ToolName -> [(ArgumentName, ArgumentValue)] -> m (Either Error Content)
+type ResourceListHandler m = ClientContext -> m [ResourceDefinition]
+type ResourceReadHandler m = ClientContext -> URI -> m (Either Error ResourceContent)
+
+type ToolListHandler m = ClientContext -> m [ToolDefinition]
+type ToolCallHandler m = ClientContext -> ToolName -> [(ArgumentName, ArgumentValue)] -> m (Either Error Content)
 
 -- | Server handlers
 data McpServerHandlers m = McpServerHandlers

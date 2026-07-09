@@ -106,13 +106,13 @@ derivePromptHandlerWithDescription typeName handlerName descriptions = do
       promptDefs <- traverse (mkPromptDefWithDescription descriptions) constructors
 
       -- Generate list handler
-      listHandlerExp <- [| pure $(return $ ListE promptDefs) |]
+      listHandlerExp <- [| \_ctx -> pure $(return $ ListE promptDefs) |]
 
       -- Generate get handler with cases
       cases <- traverse (mkDispatchCase handlerName) constructors
       defaultCase <- [| pure $ Left $ InvalidPromptName $ "Unknown prompt: " <> name |]
       let defaultMatch = Match WildP (NormalB defaultCase) []
-      let getHandlerExp = LamE [VarP (mkName "name"), VarP (mkName "args")] $
+      let getHandlerExp = LamE [VarP (mkName "ctx"), VarP (mkName "name"), VarP (mkName "args")] $
             CaseE (AppE (VarE 'T.unpack) (VarE (mkName "name")))
               (map clauseToMatch cases ++ [defaultMatch])
 
@@ -182,7 +182,7 @@ mkDispatchCase handlerName con = do
   body <- case con of
     NormalC _ [] ->
       [| do
-          content <- $(varE handlerName) $(conE name)
+          content <- $(varE handlerName) $(varE (mkName "ctx")) $(conE name)
           pure $ Right content |]
     RecC _ fields ->
       mkRecordCase name handlerName fields
@@ -203,7 +203,7 @@ mkSeparateParamsCase outerConName handlerName paramType = do
         paramConstructorApp <- buildParameterConstructor paramType fieldVars
         let outerConstructorApp = AppE (ConE outerConName) paramConstructorApp
         [| do
-            content <- $(varE handlerName) $(return outerConstructorApp)
+            content <- $(varE handlerName) $(varE (mkName "ctx")) $(return outerConstructorApp)
             pure $ Right content |]
   inner <- buildFieldValidation argMapName handlerName mkBaseExp fields 0
   [| let $(varP argMapName) = Map.fromList args in $(return inner) |]
@@ -212,14 +212,14 @@ mkRecordCase :: Name -> Name -> [(Name, Bang, Type)] -> Q Exp
 mkRecordCase recConName handlerName fields = do
   case fields of
     [] -> [| do
-        content <- $(varE handlerName) $(conE recConName)
+        content <- $(varE handlerName) $(varE (mkName "ctx")) $(conE recConName)
         pure $ Right content |]
     _ -> do
       let argMapName = mkName "argMap"
       let mkBaseExp fieldVars = do
             let constructorApp = foldl AppE (ConE recConName) (map VarE fieldVars)
             [| do
-                content <- $(varE handlerName) $(return constructorApp)
+                content <- $(varE handlerName) $(varE (mkName "ctx")) $(return constructorApp)
                 pure $ Right content |]
       inner <- buildFieldValidation argMapName handlerName mkBaseExp fields 0
       [| let $(varP argMapName) = Map.fromList args in $(return inner) |]
@@ -316,14 +316,14 @@ deriveResourceHandlerWithDescription typeName handlerName descriptions = do
     TyConI (DataD _ _ _ _ constructors _) -> do
       -- Generate resource definitions
       resourceDefs <- traverse (mkResourceDefWithDescription descriptions) constructors
-      listHandlerExp <- [| pure $(return $ ListE resourceDefs) |]
+      listHandlerExp <- [| \_ctx -> pure $(return $ ListE resourceDefs) |]
 
       -- Generate read handler with cases
       cases <- traverse (mkResourceCase handlerName) constructors
       defaultCase <- [| pure $ Left $ ResourceNotFound $ "Resource not found: " <> T.pack unknown |]
       let defaultMatch = Match (VarP (mkName "unknown")) (NormalB defaultCase) []
 
-      let readHandlerExp = LamE [VarP (mkName "uri")] $
+      let readHandlerExp = LamE [VarP (mkName "ctx"), VarP (mkName "uri")] $
             CaseE (AppE (VarE 'show) (VarE (mkName "uri")))
               (map clauseToMatch cases ++ [defaultMatch])
 
@@ -363,7 +363,7 @@ mkResourceCase handlerName (NormalC name []) = do
   let resourceName = T.pack . snakeName $ name
   let resourceURI = "resource://" <> T.unpack resourceName
   clause [litP $ stringL resourceURI]
-    (normalB [| Right <$> $(varE handlerName) $(varE (mkName "uri")) $(conE name) |])
+    (normalB [| Right <$> $(varE handlerName) $(varE (mkName "ctx")) $(varE (mkName "uri")) $(conE name) |])
     []
 mkResourceCase _ _ = fail "Unsupported constructor type for resources"
 
@@ -383,13 +383,13 @@ deriveToolHandlerWithDescription typeName handlerName descriptions = do
       -- Generate tool definitions
       toolDefs <- traverse (mkToolDefWithDescription descriptions) constructors
 
-      listHandlerExp <- [| pure $(return $ ListE toolDefs) |]
+      listHandlerExp <- [| \_ctx -> pure $(return $ ListE toolDefs) |]
 
       -- Generate call handler with cases
       cases <- traverse (mkDispatchCase handlerName) constructors
       defaultCase <- [| pure $ Left $ UnknownTool $ "Unknown tool: " <> name |]
       let defaultMatch = Match WildP (NormalB defaultCase) []
-      let callHandlerExp = LamE [VarP (mkName "name"), VarP (mkName "args")] $
+      let callHandlerExp = LamE [VarP (mkName "ctx"), VarP (mkName "name"), VarP (mkName "args")] $
             CaseE (AppE (VarE 'T.unpack) (VarE (mkName "name")))
               (map clauseToMatch cases ++ [defaultMatch])
 

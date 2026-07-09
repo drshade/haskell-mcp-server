@@ -27,20 +27,33 @@ import           MCP.Server.Protocol (protocolVersion, supportedVersions)
 import           MCP.Server.Types
 
 -- | HTTP transport configuration following the MCP Streamable HTTP specification
+--
+-- Note: 'HttpConfig' has no 'Show'/'Eq' instances because 'httpAuthorize' is a
+-- function.
 data HttpConfig = HttpConfig
-  { httpPort     :: Int      -- ^ Port to listen on
-  , httpHost     :: String   -- ^ Host to bind to (default "localhost")
-  , httpEndpoint :: String   -- ^ MCP endpoint path (default "/mcp")
-  , httpVerbose  :: Bool     -- ^ Enable verbose logging (default False)
-  } deriving (Show, Eq)
+  { httpPort      :: Int      -- ^ Port to listen on
+  , httpHost      :: String   -- ^ Host to bind to (default "localhost")
+  , httpEndpoint  :: String   -- ^ MCP endpoint path (default "/mcp")
+  , httpVerbose   :: Bool     -- ^ Enable verbose logging (default False)
+  , httpAuthorize :: Maybe (Maybe Text -> IO (Maybe Value))
+      -- ^ Optional authorization callback. 'Nothing' disables authentication.
+      --   When @'Just' check@, the bearer token presented by each request (or
+      --   'Nothing' when absent / not a Bearer credential) is passed to
+      --   @check@, which returns the caller's principal: @'Just' principal@
+      --   authorizes the request — the principal (e.g. a role) is placed in the
+      --   handler 'ClientContext' as 'clientPrincipal' — while 'Nothing' rejects
+      --   the request with @401@. Validation and principal assignment are left
+      --   entirely to the caller.
+  }
 
--- | Default HTTP configuration
+-- | Default HTTP configuration (authentication disabled).
 defaultHttpConfig :: HttpConfig
 defaultHttpConfig = HttpConfig
   { httpPort = 3000
   , httpHost = "localhost"
   , httpEndpoint = "/mcp"
   , httpVerbose = False
+  , httpAuthorize = Nothing
   }
 
 -- | Helper for conditional logging
@@ -64,14 +77,34 @@ mcpApplication config serverInfo handlers req respond = do
   -- Log the request
   logVerbose config $ "HTTP " ++ show (Wai.requestMethod req) ++ " " ++ T.unpack (TE.decodeUtf8 $ Wai.rawPathInfo req)
 
-  -- Check if this is our MCP endpoint
-  if TE.decodeUtf8 (Wai.rawPathInfo req) == T.pack (httpEndpoint config)
-    then handleMcpRequest config serverInfo handlers req respond
-    else respond $ Wai.responseLBS status404 [("Content-Type", "text/plain")] "Not Found"
+  -- Authenticate and obtain the caller's principal (if any) before anything else.
+  decision <- case httpAuthorize config of
+    Nothing    -> pure (Just Nothing)      -- auth disabled: allowed, no principal
+    Just check -> fmap (fmap Just) (check (bearerToken req))
+  case decision of
+    Nothing -> do
+      logVerbose config "Request rejected by authorization callback"
+      respond $ Wai.responseLBS
+        status401
+        [("Content-Type", "application/json"), ("WWW-Authenticate", "Bearer")]
+        (encode $ object ["error" .= ("Unauthorized" :: Text)])
+    Just principal -> do
+      let ctx = ClientContext { clientToken = bearerToken req, clientPrincipal = principal }
+      -- Check if this is our MCP endpoint
+      if TE.decodeUtf8 (Wai.rawPathInfo req) == T.pack (httpEndpoint config)
+        then handleMcpRequest config serverInfo handlers ctx req respond
+        else respond $ Wai.responseLBS status404 [("Content-Type", "text/plain")] "Not Found"
+
+-- | The bearer token presented by a request, if any: the value following
+-- @Authorization: Bearer @.
+bearerToken :: Wai.Request -> Maybe Text
+bearerToken req =
+  lookup hAuthorization (Wai.requestHeaders req)
+    >>= T.stripPrefix "Bearer " . TE.decodeUtf8
 
 -- | Handle MCP requests according to Streamable HTTP specification
-handleMcpRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleMcpRequest config serverInfo handlers req respond = do
+handleMcpRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> ClientContext -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleMcpRequest config serverInfo handlers ctx req respond = do
   -- Read the POST body up front so we can identify the `initialize` request:
   -- it negotiates the protocol version in its *body*, so (per the Streamable
   -- HTTP spec, which scopes the MCP-Protocol-Version header to "subsequent
@@ -110,7 +143,7 @@ handleMcpRequest config serverInfo handlers req respond = do
           -- POST requests for JSON-RPC messages
           "POST" -> do
             logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
-            handleJsonRpcRequest config serverInfo handlers body respond
+            handleJsonRpcRequest config serverInfo handlers ctx body respond
 
           -- OPTIONS for CORS preflight
           "OPTIONS" -> respond $ Wai.responseLBS
@@ -145,8 +178,8 @@ extractMethod body = case decode body of
   _ -> Nothing
 
 -- | Handle JSON-RPC request from HTTP body
-handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleJsonRpcRequest config serverInfo handlers body respond = do
+handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> ClientContext -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleJsonRpcRequest config serverInfo handlers ctx body respond = do
   case eitherDecode body of
     Left err -> do
       hPutStrLn stderr $ "JSON parse error: " ++ err
@@ -155,11 +188,11 @@ handleJsonRpcRequest config serverInfo handlers body respond = do
         [("Content-Type", "application/json")]
         (encode $ object ["error" .= ("Invalid JSON" :: Text)])
 
-    Right jsonValue -> handleSingleJsonRpc config serverInfo handlers jsonValue respond
+    Right jsonValue -> handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond
 
 -- | Handle a single JSON-RPC message
-handleSingleJsonRpc :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> Value -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleSingleJsonRpc config serverInfo handlers jsonValue respond = do
+handleSingleJsonRpc :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> ClientContext -> Value -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond = do
   case parseJsonRpcMessage jsonValue of
     Left err -> do
       hPutStrLn stderr $ "JSON-RPC parse error: " ++ err
@@ -170,7 +203,7 @@ handleSingleJsonRpc config serverInfo handlers jsonValue respond = do
 
     Right message -> do
       logVerbose config $ "Processing HTTP message: " ++ show (getMessageSummary message)
-      maybeResponse <- handleMcpMessage serverInfo handlers message
+      maybeResponse <- handleMcpMessage serverInfo handlers ctx message
 
       case maybeResponse of
         Just responseMsg -> do
