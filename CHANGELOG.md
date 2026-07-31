@@ -38,6 +38,26 @@ both the legacy initialize-handshake revisions and the stateless
   and unsupported revisions HTTP 400, so era-probing clients can
   distinguish them. Legacy requests keep the relaxed pre-2026 rules.
 
+### Change notifications and subscriptions/listen
+
+* New `MCP.Server.Notifications`: create an `McpNotifier` with
+  `newMcpNotifier`, hand its `NotificationSource` to a transport
+  (`stdioNotifications`/`httpNotifications`), and call
+  `notifyToolsListChanged`/`notifyPromptsListChanged`/
+  `notifyResourcesListChanged`/`notifyResourceUpdated` when things change.
+* `subscriptions/listen` (2026-07-28) is served on both transports: the
+  mandatory acknowledgment comes first with the honored filter, every
+  message is tagged with the subscription id, only opted-into types are
+  delivered, and streams end gracefully (closure responses at stdio EOF;
+  closing the SSE stream cancels over HTTP, `notifications/cancelled` over
+  stdio). HTTP streams send periodic keep-alive comments and
+  `X-Accel-Buffering: no`.
+* Legacy stdio clients receive spontaneous untagged notifications after
+  `initialize`. Capabilities are era- and transport-aware: `listChanged` is
+  advertised only where delivery is possible (stdio legacy push, or
+  modern `subscriptions/listen`), and `subscribe` only to modern clients.
+* `defaultHttpConfig` is now re-exported from `MCP.Server`.
+
 ### Resource templates and completions
 
 * Record constructors of a resource type now derive as resource /templates/

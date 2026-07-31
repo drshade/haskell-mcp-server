@@ -72,6 +72,7 @@ library
     MCP.Server.Derive
     MCP.Server.Handlers
     MCP.Server.JsonRpc
+    MCP.Server.Notifications
     MCP.Server.Protocol
     MCP.Server.Transport.Http
     MCP.Server.Transport.Stdio
@@ -94,6 +95,7 @@ library
     http-types >=0.12 && <1,
     network-uri >=2.6 && <2.8,
     scientific >=0.3 && <0.4,
+    stm >=2.5 && <2.6,
     template-haskell >=2.16 && <2.25,
     text >=1.2 && <3,
     wai >=3.2 && <4,
@@ -181,6 +183,7 @@ test-suite haskell-mcp-server-test
     Spec.ModernEra
     Spec.ProtocolVersionNegotiation
     Spec.SchemaValidation
+    Spec.Subscriptions
     Spec.TemplatesCompletions
     Spec.ToolCallParsing
     Spec.TypedArgs
@@ -208,5 +211,6 @@ test-suite haskell-mcp-server-test
     hspec,
     mcp-server,
     network-uri,
+    stm,
     text,
     wai,

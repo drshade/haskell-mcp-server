@@ -37,7 +37,7 @@ testHandlers = noHandlers
   }
 
 run :: JsonRpcMessage -> IO (Maybe JsonRpcMessage)
-run = handleMcpMessage testServerInfo defaultCacheHints testHandlers anonymousContext
+run = handleMcpMessage testServerInfo defaultCacheHints noNotificationSupport testHandlers anonymousContext
 
 request :: Text -> Maybe Value -> JsonRpcMessage
 request method params = JsonRpcMessageRequest $ JsonRpcRequest

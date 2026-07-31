@@ -12,11 +12,19 @@ module MCP.Server
   , StdioConfig(..)
   , defaultStdioConfig
   , HttpConfig(..)
+  , defaultHttpConfig
+
+    -- * Change Notifications
+  , McpNotifier(..)
+  , NotificationSource
+  , newMcpNotifier
 
     -- * Re-exports
   , module MCP.Server.Types
   ) where
 
+import           MCP.Server.Notifications (McpNotifier (..), NotificationSource,
+                                           newMcpNotifier)
 import           MCP.Server.Transport.Stdio (StdioConfig (..), defaultStdioConfig,
                                              transportRunStdio,
                                              transportRunStdioWithConfig)

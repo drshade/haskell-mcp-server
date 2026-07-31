@@ -10,7 +10,7 @@ import Test.Hspec
 import MCP.Server.Handlers (handleInitialize)
 import MCP.Server.JsonRpc (JsonRpcRequest(..), RequestId(..), JsonRpcResponse(..), JsonRpcError(..))
 import MCP.Server.Protocol (protocolVersion)
-import MCP.Server.Types (Error(..), McpServerHandlers(..), McpServerInfo(..), noHandlers)
+import MCP.Server.Types (Error(..), McpServerHandlers(..), McpServerInfo(..), noHandlers, noNotificationSupport)
 
 -- | Test that server performs proper version negotiation according to MCP spec.
 --
@@ -55,7 +55,7 @@ spec = describe "Protocol Version Negotiation" $ do
               , requestMethod = "initialize"
               , requestParams = Just params
               }
-        handleInitialize testServerInfo testHandlers request
+        handleInitialize testServerInfo noNotificationSupport testHandlers request
 
   -- Issue an initialize request proposing the given protocol version and
   -- return the negotiated version from the server's (non-error) response.

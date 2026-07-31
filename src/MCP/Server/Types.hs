@@ -51,6 +51,8 @@ module MCP.Server.Types
   , anonymousContext
   , CacheHints(..)
   , defaultCacheHints
+  , NotificationSupport(..)
+  , noNotificationSupport
   , ServerCapabilities(..)
   , PromptCapabilities(..)
   , ResourceCapabilities(..)
@@ -615,6 +617,25 @@ defaultCacheHints :: CacheHints
 defaultCacheHints = CacheHints
   { cacheTtlMs = 0
   , cacheScopePublic = False
+  }
+
+-- | What change-notification delivery the serving transport offers, which
+-- decides the @listChanged@\/@subscribe@ capabilities each era advertises.
+data NotificationSupport = NotificationSupport
+  { supportsLegacyPush :: Bool
+      -- ^ The transport can push unsolicited notifications to legacy
+      --   (initialize-handshake) clients — true for stdio with a configured
+      --   notification source; never for HTTP (this library dropped the
+      --   deprecated GET SSE stream legacy delivery relied on).
+  , supportsListen :: Bool
+      -- ^ @subscriptions\/listen@ (2026-07-28) is served.
+  } deriving (Show, Eq)
+
+-- | No notification delivery at all: nothing extra is advertised.
+noNotificationSupport :: NotificationSupport
+noNotificationSupport = NotificationSupport
+  { supportsLegacyPush = False
+  , supportsListen = False
   }
 
 -- | Handler type definitions. Every handler receives the request's

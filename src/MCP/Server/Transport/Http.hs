@@ -15,12 +15,16 @@ module MCP.Server.Transport.Http
   , decodeSentinel
   ) where
 
-import           Control.Monad            (when)
+import           Control.Concurrent.STM   (atomically, check, orElse,
+                                           readTChan, readTVar, registerDelay)
+import           Control.Monad            (forever, when)
 import           Data.Aeson
 import qualified Data.Aeson.KeyMap        as KM
 import           Data.Aeson.Types         (parseEither)
 import qualified Data.ByteString.Base64   as B64
+import qualified Data.ByteString.Builder  as B
 import qualified Data.ByteString.Lazy     as BSL
+import           Data.Maybe               (isJust)
 import           Data.String              (IsString (fromString))
 import           Data.Text                (Text)
 import qualified Data.Text                as T
@@ -33,6 +37,7 @@ import           System.IO                (hPutStrLn, stderr)
 
 import           MCP.Server.Handlers
 import           MCP.Server.JsonRpc
+import           MCP.Server.Notifications
 import           MCP.Server.Protocol (allVersions, modernVersions,
                                       supportedVersions)
 import           MCP.Server.Types
@@ -67,6 +72,13 @@ data HttpConfig = HttpConfig
   , httpCacheHints :: CacheHints
       -- ^ Cacheability hints stamped onto modern (2026-07-28+) list/read
       --   results.
+  , httpNotifications :: Maybe NotificationSource
+      -- ^ When configured, @subscriptions\/listen@ (2026-07-28) is served as
+      --   a long-lived SSE stream delivering the change notifications the
+      --   client opted into, and the @listChanged@\/@subscribe@ capabilities
+      --   are advertised to modern clients. Legacy HTTP clients have no
+      --   delivery channel (the deprecated GET SSE stream is not offered),
+      --   so legacy @initialize@ does not advertise them.
   }
 
 -- | Default HTTP configuration (authentication disabled).
@@ -79,11 +91,16 @@ defaultHttpConfig = HttpConfig
   , httpAuthorize = Nothing
   , httpAllowedOrigins = Nothing
   , httpCacheHints = defaultCacheHints
+  , httpNotifications = Nothing
   }
 
 -- | Helper for conditional logging
 logVerbose :: HttpConfig -> String -> IO ()
 logVerbose config msg = when (httpVerbose config) $ hPutStrLn stderr msg
+
+-- | Whether a notification source is configured.
+httpHasNotifications :: HttpConfig -> Bool
+httpHasNotifications = isJust . httpNotifications
 
 
 -- | Transport-specific implementation for HTTP
@@ -131,7 +148,7 @@ mcpApplication config serverInfo handlers req respond0 = do
         _ | Wai.requestMethod req == "OPTIONS"
                    -> pure (Just Nothing)      -- CORS preflight: no credentials
         Nothing    -> pure (Just Nothing)      -- auth disabled: allowed, no principal
-        Just check -> fmap (fmap Just) (check (bearerToken req))
+        Just authorize -> fmap (fmap Just) (authorize (bearerToken req))
       case decision of
         Nothing -> do
           logVerbose config "Request rejected by authorization callback"
@@ -190,9 +207,15 @@ handleMcpRequest config serverInfo handlers ctx req respond = do
             status400
             [("Content-Type", "application/json")]
             (encode $ makeErrorResponse (peekId peek) err)
-        Nothing -> do
-          logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
-          handleJsonRpcRequest config serverInfo handlers ctx modern body respond
+        Nothing
+          -- subscriptions/listen is transport-level: the response is a
+          -- long-lived SSE stream, not a single JSON object
+          | peekMethod peek == Just "subscriptions/listen"
+          , Just src <- httpNotifications config
+          -> handleSubscriptionsListen config src body respond
+          | otherwise -> do
+              logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
+              handleJsonRpcRequest config serverInfo handlers ctx modern body respond
 
     -- OPTIONS for CORS preflight
     "OPTIONS" -> respond $ Wai.responseLBS
@@ -306,6 +329,54 @@ decodeSentinel t
         Left _   -> t
   | otherwise = t
 
+-- | Serve a subscriptions/listen request (2026-07-28): a long-lived SSE
+-- stream that first acknowledges the subscription and then delivers exactly
+-- the notification types the client opted into, tagged with the
+-- subscription id. Closing the stream is the client's cancellation signal;
+-- periodic SSE comments keep intermediaries from timing the stream out.
+handleSubscriptionsListen :: HttpConfig -> NotificationSource -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleSubscriptionsListen config src body respond =
+  case eitherDecode body :: Either String JsonRpcRequest of
+    Left err -> do
+      hPutStrLn stderr $ "subscriptions/listen parse error: " ++ err
+      respond $ Wai.responseLBS
+        status400
+        [("Content-Type", "application/json")]
+        (encode $ makeErrorResponse RequestIdNull $ JsonRpcError
+          { errorCode = -32600
+          , errorMessage = "Invalid Request"
+          , errorData = Nothing
+          })
+    Right req -> do
+      let subId = requestId req
+          notifFilter = parseNotificationFilter (requestParams req)
+      logVerbose config $ "Opening subscription stream " ++ show subId
+      respond $ Wai.responseStream
+        status200
+        [ ("Content-Type", "text/event-stream")
+        , ("Cache-Control", "no-cache")
+        , ("X-Accel-Buffering", "no")
+        ]
+        $ \write flush -> do
+          chan <- atomically $ subscribeEvents src
+          let sendJson v = do
+                write $ B.lazyByteString $ "data: " <> encode v <> "\n\n"
+                flush
+          sendJson $ toJSON $ acknowledgedNotification subId notifFilter
+          forever $ do
+            keepAlive <- registerDelay 25000000  -- 25s
+            next <- atomically $
+              (Just <$> readTChan chan)
+                `orElse` (readTVar keepAlive >>= check >> pure Nothing)
+            case next of
+              Just event
+                | filterAccepts notifFilter event ->
+                    sendJson $ toJSON $ eventNotification subId event
+                | otherwise -> pure ()
+              Nothing -> do
+                write $ B.byteString ": keep-alive\n\n"
+                flush
+
 -- | Handle JSON-RPC request from HTTP body
 handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Bool -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 handleJsonRpcRequest config serverInfo handlers ctx modern body respond = do
@@ -340,7 +411,11 @@ handleSingleJsonRpc config serverInfo handlers ctx modern jsonValue respond = do
 
     Right message -> do
       logVerbose config $ "Processing HTTP message: " ++ show (getMessageSummary message)
-      maybeResponse <- handleMcpMessage serverInfo (httpCacheHints config) handlers ctx message
+      let notifSupport = NotificationSupport
+            { supportsLegacyPush = False  -- no legacy HTTP delivery channel
+            , supportsListen = httpHasNotifications config
+            }
+      maybeResponse <- handleMcpMessage serverInfo (httpCacheHints config) notifSupport handlers ctx message
 
       case maybeResponse of
         Just responseMsg -> do

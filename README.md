@@ -253,6 +253,35 @@ main = runMcpServerStdio serverInfo handlers
       }
 ```
 
+## Change Notifications
+
+Servers whose tool/prompt/resource lists change at runtime can push change
+notifications. Create a notifier, hand its source to the transport, and call
+the notifier when things change:
+
+```haskell
+main :: IO ()
+main = do
+    (notifier, source) <- newMcpNotifier
+    _ <- forkIO $ appLogic notifier   -- calls notifyToolsListChanged etc.
+    runMcpServerStdioWithConfig
+        defaultStdioConfig { stdioNotifications = Just source }
+        serverInfo handlers
+```
+
+Delivery is transport- and era-aware, and the `listChanged`/`subscribe`
+capabilities are advertised automatically where delivery is actually
+possible:
+
+- **Modern clients (2026-07-28)** open a `subscriptions/listen` stream (a
+  long-lived SSE response over HTTP) and receive only the notification types
+  they opted into, tagged with their subscription id — including
+  `notifications/resources/updated` for watched URIs.
+- **Legacy stdio clients** receive spontaneous untagged notifications after
+  `initialize`.
+- **Legacy HTTP clients** have no delivery channel (this library does not
+  offer the deprecated GET SSE stream), so nothing is advertised to them.
+
 ## HTTP Transport (NEW!)
 
 The library supports the MCP Streamable HTTP transport. Compile your
