@@ -6,11 +6,20 @@ module MCP.Server.Transport.Http
     HttpConfig(..)
   , transportRunHttp
   , defaultHttpConfig
+
+    -- * Request validation (exposed for testing)
+  , BodyPeek(..)
+  , peekBody
+  , peekIsModern
+  , validateRequestHeaders
+  , decodeSentinel
   ) where
 
 import           Control.Monad            (when)
 import           Data.Aeson
 import qualified Data.Aeson.KeyMap        as KM
+import           Data.Aeson.Types         (parseEither)
+import qualified Data.ByteString.Base64   as B64
 import qualified Data.ByteString.Lazy     as BSL
 import           Data.String              (IsString (fromString))
 import           Data.Text                (Text)
@@ -24,7 +33,8 @@ import           System.IO                (hPutStrLn, stderr)
 
 import           MCP.Server.Handlers
 import           MCP.Server.JsonRpc
-import           MCP.Server.Protocol (supportedVersions)
+import           MCP.Server.Protocol (allVersions, modernVersions,
+                                      supportedVersions)
 import           MCP.Server.Types
 
 -- | HTTP transport configuration following the MCP Streamable HTTP specification
@@ -54,6 +64,9 @@ data HttpConfig = HttpConfig
       --   header (non-browser clients) are always allowed. 'Nothing' disables
       --   the check — only appropriate when the server is not reachable from
       --   a browser (e.g. bound to localhost for CLI clients).
+  , httpCacheHints :: CacheHints
+      -- ^ Cacheability hints stamped onto modern (2026-07-28+) list/read
+      --   results.
   }
 
 -- | Default HTTP configuration (authentication disabled).
@@ -65,6 +78,7 @@ defaultHttpConfig = HttpConfig
   , httpVerbose = False
   , httpAuthorize = Nothing
   , httpAllowedOrigins = Nothing
+  , httpCacheHints = defaultCacheHints
   }
 
 -- | Helper for conditional logging
@@ -126,7 +140,7 @@ mcpApplication config serverInfo handlers req respond0 = do
             [("Content-Type", "application/json"), ("WWW-Authenticate", "Bearer")]
             (encode $ object ["error" .= ("Unauthorized" :: Text)])
         Just principal -> do
-          let ctx = ClientContext { clientToken = bearerToken req, clientPrincipal = principal }
+          let ctx = anonymousContext { clientToken = bearerToken req, clientPrincipal = principal }
           -- Check if this is our MCP endpoint
           if TE.decodeUtf8 (Wai.rawPathInfo req) == T.pack (httpEndpoint config)
             then handleMcpRequest config serverInfo handlers ctx req respond
@@ -156,63 +170,145 @@ bearerToken req = do
 -- | Handle MCP requests according to Streamable HTTP specification
 handleMcpRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 handleMcpRequest config serverInfo handlers ctx req respond = do
-  -- Read the POST body up front so we can identify the `initialize` request:
-  -- it negotiates the protocol version in its *body*, so (per the Streamable
-  -- HTTP spec, which scopes the MCP-Protocol-Version header to "subsequent
-  -- requests") it is exempt from the header check. For any other request a
-  -- *missing* header is accepted, while a *present but unsupported* one is
-  -- rejected with 400.
+  -- Read the POST body up front: the request era and header validation both
+  -- depend on it. A body declaring a modern protocol revision in _meta gets
+  -- the 2026-07-28 header validation (header/body match, Mcp-Method,
+  -- Mcp-Name); a legacy body keeps the relaxed pre-2026 rules, where
+  -- `initialize` is exempt (it negotiates in the body), a missing
+  -- MCP-Protocol-Version header is accepted, and a present-but-unsupported
+  -- one is rejected with 400.
   body <- if Wai.requestMethod req == "POST" then Wai.strictRequestBody req else pure ""
-  if extractMethod body /= Just "initialize" && not (versionHeaderSupported req)
-    then do
-      logVerbose config "Request rejected: unsupported MCP-Protocol-Version header"
-      respond $ Wai.responseLBS
-        status400
-        [("Content-Type", "application/json")]
-        (encode $ object ["error" .= ("Unsupported protocol version. Supported versions: " <> T.intercalate ", " supportedVersions)])
-    else
-        case Wai.requestMethod req of
-          -- POST requests for JSON-RPC messages
-          "POST" -> do
-            logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
-            handleJsonRpcRequest config serverInfo handlers ctx body respond
+  let peek = peekBody body
+      modern = peekIsModern peek
+  case Wai.requestMethod req of
+    -- POST requests for JSON-RPC messages
+    "POST" ->
+      case validateRequestHeaders req peek of
+        Just err -> do
+          logVerbose config $ "Request rejected: " ++ T.unpack (errorMessage err)
+          respond $ Wai.responseLBS
+            status400
+            [("Content-Type", "application/json")]
+            (encode $ makeErrorResponse (peekId peek) err)
+        Nothing -> do
+          logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
+          handleJsonRpcRequest config serverInfo handlers ctx modern body respond
 
-          -- OPTIONS for CORS preflight
-          "OPTIONS" -> respond $ Wai.responseLBS
-            status200
-            [ ("Access-Control-Allow-Methods", "POST, OPTIONS")
-            , ("Access-Control-Allow-Headers", "Content-Type, Authorization, MCP-Protocol-Version")
-            ]
-            ""
+    -- OPTIONS for CORS preflight
+    "OPTIONS" -> respond $ Wai.responseLBS
+      status200
+      [ ("Access-Control-Allow-Methods", "POST, OPTIONS")
+      , ("Access-Control-Allow-Headers", "Content-Type, Authorization, MCP-Protocol-Version, Mcp-Method, Mcp-Name")
+      ]
+      ""
 
-          -- Everything else, including GET: the MCP endpoint only speaks
-          -- JSON-RPC over POST (this library does not offer server-initiated
-          -- SSE streams, and revision 2026-07-28 requires 405 for GET).
-          _ -> respond $ Wai.responseLBS
-            status405
-            [("Content-Type", "text/plain"), ("Allow", "POST, OPTIONS")]
-            "Method Not Allowed"
+    -- Everything else, including GET: the MCP endpoint only speaks
+    -- JSON-RPC over POST (this library does not offer server-initiated
+    -- SSE streams, and revision 2026-07-28 requires 405 for GET).
+    _ -> respond $ Wai.responseLBS
+      status405
+      [("Content-Type", "text/plain"), ("Allow", "POST, OPTIONS")]
+      "Method Not Allowed"
 
--- | True unless the request carries a *present but unsupported*
--- MCP-Protocol-Version header. A missing header is treated as acceptable, since
--- the spec allows the server to assume a default protocol version in that case.
-versionHeaderSupported :: Wai.Request -> Bool
-versionHeaderSupported req =
-  case lookup "MCP-Protocol-Version" (Wai.requestHeaders req) of
-    Nothing -> True
-    Just hv -> TE.decodeUtf8 hv `elem` supportedVersions
+-- | The parts of a JSON-RPC body that header validation needs.
+data BodyPeek = BodyPeek
+  { peekMethod      :: Maybe Text
+  , peekMetaVersion :: Maybe Text
+  , peekName        :: Maybe Text  -- ^ params.name or params.uri
+  , peekId          :: RequestId
+  }
 
--- | Peek at a JSON-RPC message body to read its @method@ (if present).
-extractMethod :: BSL.ByteString -> Maybe Text
-extractMethod body = case decode body of
-  Just (Object o) -> case KM.lookup "method" o of
-    Just (String m) -> Just m
-    _               -> Nothing
-  _ -> Nothing
+-- | Whether the body declares a modern (2026-07-28+) request.
+peekIsModern :: BodyPeek -> Bool
+peekIsModern peek =
+  peekMetaVersion peek /= Nothing || peekMethod peek == Just "server/discover"
+
+peekBody :: BSL.ByteString -> BodyPeek
+peekBody body = case decode body of
+  Just (Object o) -> BodyPeek
+    { peekMethod = case KM.lookup "method" o of
+        Just (String m) -> Just m
+        _               -> Nothing
+    , peekMetaVersion = metaProtocolVersion (KM.lookup "params" o)
+    , peekName = case KM.lookup "params" o of
+        Just (Object p) -> case (KM.lookup "name" p, KM.lookup "uri" p) of
+          (Just (String n), _) -> Just n
+          (_, Just (String u)) -> Just u
+          _                    -> Nothing
+        _ -> Nothing
+    , peekId = case KM.lookup "id" o of
+        Just v  -> either (const RequestIdNull) id (parseEither parseJSON v)
+        Nothing -> RequestIdNull
+    }
+  _ -> BodyPeek Nothing Nothing Nothing RequestIdNull
+
+-- | Validate the request-metadata headers against the body. 'Nothing' means
+-- the request may proceed; @'Just' err@ is answered with 400 and the given
+-- JSON-RPC error.
+--
+-- Modern requests (body declares a protocol revision in @_meta@) follow the
+-- 2026-07-28 rules: the MCP-Protocol-Version header must match the body's
+-- declared revision, Mcp-Method must match the body method, and Mcp-Name
+-- must match @params.name@/@params.uri@ for the three named methods
+-- (@HeaderMismatch@, -32020); an undeclared revision yields
+-- @UnsupportedProtocolVersionError@ (-32022).
+--
+-- Legacy requests keep the relaxed pre-2026 rules: only a
+-- present-but-unsupported MCP-Protocol-Version header is rejected, and
+-- @initialize@ is exempt entirely.
+validateRequestHeaders :: Wai.Request -> BodyPeek -> Maybe JsonRpcError
+validateRequestHeaders req peek = case peekMetaVersion peek of
+  Just v
+    | v `notElem` modernVersions -> Just (unsupportedVersionError v)
+    | headerText "MCP-Protocol-Version" /= Just v ->
+        Just $ headerMismatch $ "MCP-Protocol-Version header "
+          <> maybe "is missing" (\h -> "value '" <> h <> "'") (headerText "MCP-Protocol-Version")
+          <> " and does not match body value '" <> v <> "'"
+    | headerText "Mcp-Method" /= peekMethod peek ->
+        Just $ headerMismatch $ "Mcp-Method header "
+          <> maybe "is missing" (\h -> "value '" <> h <> "'") (headerText "Mcp-Method")
+          <> " and does not match body method"
+    | needsName
+    , (decodeSentinel <$> headerText "Mcp-Name") /= peekName peek ->
+        Just $ headerMismatch $ "Mcp-Name header "
+          <> maybe "is missing" (\h -> "value '" <> h <> "'") (headerText "Mcp-Name")
+          <> " and does not match the body name/uri"
+    | otherwise -> Nothing
+  Nothing
+    | peekMethod peek /= Just "initialize"
+    , Just hv <- headerText "MCP-Protocol-Version"
+    , hv `notElem` supportedVersions ++ modernVersions ->
+        Just $ JsonRpcError
+          { errorCode = -32600
+          , errorMessage = "Unsupported protocol version. Supported versions: "
+              <> T.intercalate ", " allVersions
+          , errorData = Nothing
+          }
+    | otherwise -> Nothing
+  where
+    headerText name =
+      TE.decodeUtf8With lenientDecode <$> lookup name (Wai.requestHeaders req)
+    needsName = peekMethod peek `elem` map Just ["tools/call", "resources/read", "prompts/get"]
+    headerMismatch msg = JsonRpcError
+      { errorCode = -32020
+      , errorMessage = "Header mismatch: " <> msg
+      , errorData = Nothing
+      }
+
+-- | Decode the @=?base64?...?=@ sentinel encoding the 2026-07-28 transport
+-- uses for header values that cannot be represented in plain ASCII. Values
+-- not wrapped in the sentinel (or with invalid base64) pass through as-is.
+decodeSentinel :: Text -> Text
+decodeSentinel t
+  | Just inner <- T.stripPrefix "=?base64?" t >>= T.stripSuffix "?=" =
+      case B64.decode (TE.encodeUtf8 inner) of
+        Right bs -> TE.decodeUtf8With lenientDecode bs
+        Left _   -> t
+  | otherwise = t
 
 -- | Handle JSON-RPC request from HTTP body
-handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleJsonRpcRequest config serverInfo handlers ctx body respond = do
+handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Bool -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleJsonRpcRequest config serverInfo handlers ctx modern body respond = do
   case eitherDecode body of
     Left err -> do
       hPutStrLn stderr $ "JSON parse error: " ++ err
@@ -225,11 +321,11 @@ handleJsonRpcRequest config serverInfo handlers ctx body respond = do
           , errorData = Nothing
           })
 
-    Right jsonValue -> handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond
+    Right jsonValue -> handleSingleJsonRpc config serverInfo handlers ctx modern jsonValue respond
 
 -- | Handle a single JSON-RPC message
-handleSingleJsonRpc :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Value -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond = do
+handleSingleJsonRpc :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Bool -> Value -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleSingleJsonRpc config serverInfo handlers ctx modern jsonValue respond = do
   case parseJsonRpcMessage jsonValue of
     Left err -> do
       hPutStrLn stderr $ "JSON-RPC parse error: " ++ err
@@ -244,14 +340,14 @@ handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond = do
 
     Right message -> do
       logVerbose config $ "Processing HTTP message: " ++ show (getMessageSummary message)
-      maybeResponse <- handleMcpMessage serverInfo handlers ctx message
+      maybeResponse <- handleMcpMessage serverInfo (httpCacheHints config) handlers ctx message
 
       case maybeResponse of
         Just responseMsg -> do
           let responseJson = encode $ encodeJsonRpcMessage responseMsg
           logVerbose config $ "Sending HTTP response for: " ++ show (getMessageSummary message)
           respond $ Wai.responseLBS
-            status200
+            (statusForResponse modern responseMsg)
             [("Content-Type", "application/json")]
             responseJson
 
@@ -259,3 +355,14 @@ handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond = do
           logVerbose config $ "No response needed for: " ++ show (getMessageSummary message)
           -- Accepted notification: 202 with no body, per the Streamable HTTP spec
           respond $ Wai.responseLBS status202 [] ""
+
+-- | The HTTP status for a JSON-RPC response. Modern (2026-07-28) requests
+-- map protocol-level failures onto HTTP statuses — 404 for an unknown RPC
+-- method, 400 for an unsupported protocol version — so era-probing clients
+-- can distinguish them; legacy requests always get 200 as before.
+statusForResponse :: Bool -> JsonRpcMessage -> Status
+statusForResponse True (JsonRpcMessageResponse r) = case responseError r of
+  Just e | errorCode e == -32601 -> status404
+         | errorCode e == -32022 -> status400
+  _ -> status200
+statusForResponse _ _ = status200

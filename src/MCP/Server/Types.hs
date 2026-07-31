@@ -41,6 +41,9 @@ module MCP.Server.Types
   , McpServerInfo(..)
   , McpServerHandlers(..)
   , ClientContext(..)
+  , anonymousContext
+  , CacheHints(..)
+  , defaultCacheHints
   , ServerCapabilities(..)
   , PromptCapabilities(..)
   , ResourceCapabilities(..)
@@ -516,7 +519,44 @@ data ClientContext = ClientContext
                                     --   the transport's authorization callback
                                     --   (e.g. a role). 'Nothing' when
                                     --   authentication is disabled.
+  , clientProtocolVersion :: Maybe Text
+      -- ^ The protocol revision the request declared in its @_meta@
+      --   (modern, 2026-07-28+ clients). 'Nothing' for legacy clients that
+      --   negotiated via @initialize@.
+  , clientInfo :: Maybe Value
+      -- ^ The client's self-reported identity from request @_meta@
+      --   (modern clients), for display/logging only.
+  , clientCapabilities :: Maybe Value
+      -- ^ The client's declared capabilities from request @_meta@
+      --   (modern clients).
   } deriving (Show, Eq)
+
+-- | A context carrying no transport- or request-level information: what
+-- handlers see for legacy stdio requests.
+anonymousContext :: ClientContext
+anonymousContext = ClientContext
+  { clientToken = Nothing
+  , clientPrincipal = Nothing
+  , clientProtocolVersion = Nothing
+  , clientInfo = Nothing
+  , clientCapabilities = Nothing
+  }
+
+-- | Cacheability hints stamped onto modern (2026-07-28+) list/read results,
+-- which require @ttlMs@ and @cacheScope@ fields.
+data CacheHints = CacheHints
+  { cacheTtlMs       :: Int   -- ^ Freshness hint in milliseconds.
+  , cacheScopePublic :: Bool  -- ^ 'True' allows shared intermediaries to
+                              --   cache the response (@\"public\"@);
+                              --   'False' is @\"private\"@.
+  } deriving (Show, Eq)
+
+-- | Conservative defaults: no caching (@ttlMs = 0@), private scope.
+defaultCacheHints :: CacheHints
+defaultCacheHints = CacheHints
+  { cacheTtlMs = 0
+  , cacheScopePublic = False
+  }
 
 -- | Handler type definitions. Every handler receives the request's
 -- 'ClientContext' as its first argument.

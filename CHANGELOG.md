@@ -2,8 +2,41 @@
 
 ## 0.2.0.0 - ???
 
-A major overhaul of the handler API. The headline change: the handler
-boundary is no longer stringly typed.
+A major overhaul of the handler API. The headline changes: the handler
+boundary is no longer stringly typed, and the server is dual-era — it speaks
+both the legacy initialize-handshake revisions and the stateless
+`2026-07-28` revision.
+
+### Dual-era protocol support (2026-07-28)
+
+* Requests that declare a protocol revision in their params `_meta`
+  (`io.modelcontextprotocol/protocolVersion`) are served statelessly with
+  the modern result envelope: `resultType: "complete"`, the server identity
+  in result `_meta`, and — on `tools/list`, `prompts/list`,
+  `resources/list`, `resources/read` and `server/discover` — the required
+  `ttlMs`/`cacheScope` fields (configurable via `CacheHints` on the
+  transport configs; default: no caching, private). Requests without modern
+  `_meta` are served byte-identically to before under the revision
+  negotiated by `initialize`.
+* New `server/discover` method (mandatory in 2026-07-28, and the
+  backwards-compatibility probe): supported revisions of both eras,
+  handler-gated capabilities, server identity and instructions.
+* Declaring an unsupported revision returns
+  `UnsupportedProtocolVersionError` (`-32022`) listing the supported set.
+* A legacy client proposing `2026-07-28` via `initialize` negotiates down
+  to `2025-11-25`: an initializing client is legacy by definition.
+* Handlers can read the declared revision, client info and client
+  capabilities from the `ClientContext`
+  (`clientProtocolVersion`/`clientInfo`/`clientCapabilities`); the new
+  `anonymousContext` builds an empty context.
+* HTTP: modern requests get the 2026-07-28 request-metadata validation —
+  the `MCP-Protocol-Version` header must match the body's declared
+  revision, `Mcp-Method` must match the body method, and `Mcp-Name` must
+  match `params.name`/`params.uri` for `tools/call`/`resources/read`/
+  `prompts/get` (with `=?base64?…?=` sentinel decoding); violations return
+  `400` with `HeaderMismatch` (`-32020`). Unknown methods return HTTP 404
+  and unsupported revisions HTTP 400, so era-probing clients can
+  distinguish them. Legacy requests keep the relaxed pre-2026 rules.
 
 ### Typed tool arguments and results (BREAKING)
 

@@ -28,12 +28,16 @@ data StdioConfig = StdioConfig
     -- ^ When 'True', raw request bodies are logged to stderr. The default
     -- ('False') logs only message summaries (method and id): tool arguments
     -- may carry sensitive data that does not belong in logs.
+  , stdioCacheHints :: CacheHints
+    -- ^ Cacheability hints stamped onto modern (2026-07-28+) list/read
+    -- results.
   } deriving (Show, Eq)
 
--- | Default STDIO configuration: summaries only, no raw bodies.
+-- | Default STDIO configuration: summaries only, no raw bodies, no caching.
 defaultStdioConfig :: StdioConfig
 defaultStdioConfig = StdioConfig
   { stdioVerbose = False
+  , stdioCacheHints = defaultCacheHints
   }
 
 -- | Run the STDIO transport with the default configuration.
@@ -78,7 +82,7 @@ transportRunStdioWithConfig config serverInfo handlers = do
                       }
                   Right message -> do
                     logLine $ "Processing message: " <> T.pack (show (getMessageSummary message))
-                    response <- handleMcpMessage serverInfo handlers (ClientContext Nothing Nothing) message
+                    response <- handleMcpMessage serverInfo (stdioCacheHints config) handlers anonymousContext message
                     case response of
                       Just responseMsg -> do
                         logLine $ "Sending response for: " <> T.pack (show (getMessageSummary message))

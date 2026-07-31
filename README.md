@@ -4,7 +4,7 @@ A fully-featured Haskell library for building [Model Context Protocol (MCP)](htt
 
 ## Features
 
-- **Complete MCP Implementation**: Negotiates MCP protocol revisions `2024-11-05` through `2025-11-25` (the shared wire format for tool/resource/prompt operations)
+- **Complete MCP Implementation**: Dual-era server — legacy revisions `2024-11-05` through `2025-11-25` via the `initialize` handshake, and the stateless `2026-07-28` revision via per-request `_meta` (including `server/discover`, `resultType`, and cacheability fields)
 - **Type-Safe API**: Leverage Haskell's type system for robust MCP servers
 - **Multiple Abstractions**: Both low-level fine-grained control and high-level derived interfaces
 - **Template Haskell Support**: Automatic handler derivation from data types
@@ -227,12 +227,11 @@ main = runMcpServerHttp serverInfo handlers
 -- Custom configuration
 main = runMcpServerHttpWithConfig customConfig serverInfo handlers
   where
-    customConfig = HttpConfig
+    customConfig = defaultHttpConfig
       { httpPort = 8080
       , httpHost = "0.0.0.0"
       , httpEndpoint = "/api/mcp"
       , httpVerbose = True     -- Enable detailed logging
-      , httpAuthorize = Nothing -- No authentication (see below)
       , httpAllowedOrigins = Just ["https://app.example.com"]
           -- Origin validation (DNS-rebinding protection): requests with an
           -- Origin header outside this list are rejected with 403. Nothing
@@ -260,9 +259,14 @@ application; the library only threads the identity through:
 - CORS enabled for web clients
 - POST `/mcp` for JSON-RPC messages (GET returns 405 — this library does not
   offer server-initiated SSE streams)
-- Protocol-version negotiation across supported revisions (`2024-11-05`–`2025-11-25`)
+- Dual-era protocol support: legacy revisions (`2024-11-05`–`2025-11-25`)
+  negotiate via `initialize`; the stateless `2026-07-28` revision declares its
+  version per request in `_meta`, with full request-metadata header
+  validation (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` including the
+  base64 sentinel encoding)
 - Optional pluggable bearer-token authentication via `httpAuthorize`
 - Origin validation via `httpAllowedOrigins`
+- Cacheability hints for modern list/read results via `httpCacheHints`
 
 ## Examples
 
