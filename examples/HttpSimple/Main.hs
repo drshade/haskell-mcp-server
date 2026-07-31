@@ -16,13 +16,13 @@ main = do
     -- Create a simple in-memory store
     store <- newIORef []
 
-    let handleTool :: SimpleTool -> IO Content
-        handleTool (GetValue k) = do
+    let handleTool :: ClientContext -> SimpleTool -> IO Content
+        handleTool _ (GetValue k) = do
             pairs <- readIORef store
             case lookup k pairs of
                 Nothing -> pure $ ContentText $ "Key '" <> k <> "' not found"
                 Just v  -> pure $ ContentText v
-        handleTool (SetValue k v) = do
+        handleTool _ (SetValue k v) = do
             pairs <- readIORef store
             let newPairs = (k, v) : filter ((/= k) . fst) pairs
             writeIORef store newPairs

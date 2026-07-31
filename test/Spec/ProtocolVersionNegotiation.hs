@@ -10,7 +10,7 @@ import Test.Hspec
 import MCP.Server.Handlers (handleInitialize)
 import MCP.Server.JsonRpc (JsonRpcRequest(..), RequestId(..), JsonRpcResponse(..), JsonRpcError(..))
 import MCP.Server.Protocol (protocolVersion)
-import MCP.Server.Types (McpServerInfo(..))
+import MCP.Server.Types (Error(..), McpServerHandlers(..), McpServerInfo(..))
 
 -- | Test that server performs proper version negotiation according to MCP spec.
 --
@@ -31,10 +31,18 @@ spec = describe "Protocol Version Negotiation" $ do
         , serverInstructions = "Test server for version negotiation"
         }
 
-  -- Issue an initialize request proposing the given protocol version and
-  -- return the negotiated version from the server's (non-error) response.
-  let negotiate :: Text -> IO Text
-      negotiate clientVersion = do
+  -- A server that only provides tools: capabilities in the initialize
+  -- response should reflect exactly this.
+  let testHandlers = McpServerHandlers
+        { prompts = Nothing
+        , resources = Nothing
+        , tools = Just ( \_ctx -> pure []
+                       , \_ctx name _args -> pure (Left (UnknownTool name))
+                       )
+        }
+
+  let initialize :: Text -> IO JsonRpcResponse
+      initialize clientVersion = do
         let params = object
               [ "protocolVersion" .= String clientVersion
               , "capabilities" .= object []
@@ -49,7 +57,13 @@ spec = describe "Protocol Version Negotiation" $ do
               , requestMethod = "initialize"
               , requestParams = Just params
               }
-        response <- handleInitialize testServerInfo request
+        handleInitialize testServerInfo testHandlers request
+
+  -- Issue an initialize request proposing the given protocol version and
+  -- return the negotiated version from the server's (non-error) response.
+  let negotiate :: Text -> IO Text
+      negotiate clientVersion = do
+        response <- initialize clientVersion
         case responseError response of
           Just err ->
             error $ "Server returned error instead of negotiating version. "
@@ -79,3 +93,17 @@ spec = describe "Protocol Version Negotiation" $ do
 
   it "falls back to the server's own version for an unknown/unsupported version" $
     negotiate "1999-01-01" `shouldReturn` protocolVersion
+
+  -- Strict clients drop a server that advertises a capability and then answers
+  -- the corresponding list request with an error, so only capabilities with an
+  -- actual handler may be advertised.
+  it "advertises only the capabilities that have handlers" $ do
+    response <- initialize protocolVersion
+    caps <- case responseResult response of
+      Just (Object result) -> case KM.lookup "capabilities" result of
+        Just (Object capsObj) -> pure capsObj
+        other -> error $ "capabilities is not an object: " ++ show other
+      other -> error $ "Result is not an object: " ++ show other
+    KM.member "tools" caps `shouldBe` True
+    KM.member "prompts" caps `shouldBe` False
+    KM.member "resources" caps `shouldBe` False

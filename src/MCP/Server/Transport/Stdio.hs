@@ -43,7 +43,7 @@ transportRunStdio serverInfo handlers = do
               Left err -> liftIO $ TIO.hPutStrLn stderr $ "JSON-RPC parse error: " <> T.pack err
               Right message -> do
                 liftIO $ TIO.hPutStrLn stderr $ "Processing message: " <> T.pack (show (getMessageSummary message))
-                response <- handleMcpMessage serverInfo handlers message
+                response <- handleMcpMessage serverInfo handlers (ClientContext Nothing Nothing) message
                 case response of
                   Just responseMsg -> do
                     liftIO $ TIO.hPutStrLn stderr $ "Sending response for: " <> T.pack (show (getMessageSummary message))

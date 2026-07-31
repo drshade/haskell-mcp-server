@@ -15,7 +15,7 @@ name: mcp-server
 -- PVP summary:     +-+------- breaking API changes
 --                  | | +----- non-breaking API additions
 --                  | | | +--- code changes with no API change
-version: 0.1.0.20
+version: 0.1.0.21
 -- A short (one-line) description of the package.
 synopsis: Library for building Model Context Protocol (MCP) servers
 -- A longer description of the package.
@@ -156,6 +156,8 @@ executable http-simple-example
 
   -- Directories containing source files.
   hs-source-dirs: examples/HttpSimple
+  -- Warp requires the threaded RTS (its timeout manager needs it).
+  ghc-options: -threaded
   -- Base language which the package is written in.
   default-language: GHC2021
 

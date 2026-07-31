@@ -14,7 +14,7 @@ allTypesHandlers :: (ToolListHandler IO, ToolCallHandler IO)
 allTypesHandlers = $(deriveToolHandler ''AllTypesTool 'handleAllTypesTool)
 
 callTool :: Text -> [(Text, Text)] -> IO (Either Error Content)
-callTool = snd allTypesHandlers
+callTool = snd allTypesHandlers anonCtx
 
 shouldBeRight :: IO (Either Error Content) -> Text -> IO ()
 shouldBeRight action expected = do

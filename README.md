@@ -41,18 +41,19 @@ data MyPrompt = Recipe { idea :: Text } | Shopping { items :: Text }
 data MyResource = Menu | Specials
 data MyTool = Search { query :: Text } | Order { item :: Text }
 
--- Implement handlers
-handlePrompt :: MyPrompt -> IO Content
-handlePrompt (Recipe idea) = pure $ ContentText $ "Recipe for " <> idea
-handlePrompt (Shopping items) = pure $ ContentText $ "Shopping list: " <> items
+-- Implement handlers. Every handler receives the per-request 'ClientContext'
+-- (the caller's bearer token and principal on the HTTP transport) first.
+handlePrompt :: ClientContext -> MyPrompt -> IO Content
+handlePrompt _ (Recipe idea) = pure $ ContentText $ "Recipe for " <> idea
+handlePrompt _ (Shopping items) = pure $ ContentText $ "Shopping list: " <> items
 
-handleResource :: MyResource -> IO Content
-handleResource Menu = pure $ ContentText "Today's menu..."
-handleResource Specials = pure $ ContentText "Daily specials..."
+handleResource :: ClientContext -> URI -> MyResource -> IO ResourceContent
+handleResource _ uri Menu = pure $ ResourceText uri "text/plain" "Today's menu..."
+handleResource _ uri Specials = pure $ ResourceText uri "text/plain" "Daily specials..."
 
-handleTool :: MyTool -> IO Content
-handleTool (Search query) = pure $ ContentText $ "Search results for " <> query
-handleTool (Order item) = pure $ ContentText $ "Ordered " <> item
+handleTool :: ClientContext -> MyTool -> IO Content
+handleTool _ (Search query) = pure $ ContentText $ "Search results for " <> query
+handleTool _ (Order item) = pure $ ContentText $ "Ordered " <> item
 
 -- Derive handlers automatically
 main :: IO ()
@@ -163,9 +164,10 @@ For fine-grained control, implement handlers manually:
 ```haskell
 import MCP.Server
 
--- Manual handler implementation
-promptListHandler :: IO [PromptDefinition]
-promptGetHandler :: PromptName -> [(ArgumentName, ArgumentValue)] -> IO (Either Error Content)
+-- Manual handler implementation. Every handler receives the per-request
+-- 'ClientContext' as its first argument.
+promptListHandler :: ClientContext -> IO [PromptDefinition]
+promptGetHandler :: ClientContext -> PromptName -> [(ArgumentName, ArgumentValue)] -> IO (Either Error Content)
 -- ... implement your custom logic
 
 main :: IO ()
@@ -180,7 +182,8 @@ main = runMcpServerStdio serverInfo handlers
 
 ## HTTP Transport (NEW!)
 
-The library supports the MCP Streamable HTTP transport:
+The library supports the MCP Streamable HTTP transport. Compile your
+executable with `ghc-options: -threaded` — Warp requires the threaded runtime:
 
 ```haskell
 import MCP.Server.Transport.Http
@@ -195,7 +198,24 @@ main = runMcpServerHttpWithConfig customConfig serverInfo handlers
       { httpPort = 8080
       , httpHost = "0.0.0.0"
       , httpEndpoint = "/api/mcp"
-      , httpVerbose = True  -- Enable detailed logging
+      , httpVerbose = True     -- Enable detailed logging
+      , httpAuthorize = Nothing -- No authentication (see below)
+      }
+```
+
+**Bearer-token authentication** (optional): supply an `httpAuthorize` callback
+to validate the `Authorization: Bearer` token each request presents. Return
+`Just principal` to authorize (the principal — any JSON `Value`, e.g. a role —
+reaches your handlers as `clientPrincipal` in the `ClientContext`), or
+`Nothing` to reject the request with 401. Token policy lives entirely in your
+application; the library only threads the identity through:
+
+```haskell
+    customConfig = defaultHttpConfig
+      { httpAuthorize = Just $ \mtoken -> case mtoken of
+          Just "secret-admin-token" -> pure $ Just (String "admin")
+          Just "secret-user-token"  -> pure $ Just (String "user")
+          _                         -> pure Nothing
       }
 ```
 
@@ -204,6 +224,7 @@ main = runMcpServerHttpWithConfig customConfig serverInfo handlers
 - GET `/mcp` for server discovery
 - POST `/mcp` for JSON-RPC messages
 - Protocol-version negotiation across supported revisions (`2024-11-05`–`2025-11-25`)
+- Optional pluggable bearer-token authentication via `httpAuthorize`
 
 ## Examples
 
