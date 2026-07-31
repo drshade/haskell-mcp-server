@@ -132,19 +132,27 @@ extendedCases =
 meta :: BSL.ByteString
 meta = "\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientInfo\":{\"name\":\"golden-client\",\"version\":\"1.0\"},\"io.modelcontextprotocol/clientCapabilities\":{}}"
 
-runCase :: McpServerHandlers -> BSL.ByteString -> IO Value
-runCase handlers raw = do
+-- Capability fixtures for a transport that delivers notifications (stdio
+-- with a configured source: legacy push + modern listen)
+notifyingCases :: [(FilePath, BSL.ByteString)]
+notifyingCases =
+  [ ("legacy/initialize-notifying", "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"golden-client\",\"version\":\"1.0\"}}}")
+  , ("modern/server-discover-notifying", "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"server/discover\",\"params\":{" <> meta <> "}}")
+  ]
+
+runCase :: NotificationSupport -> McpServerHandlers -> BSL.ByteString -> IO Value
+runCase support handlers raw = do
   jsonValue <- either (fail . ("request does not parse: " ++)) pure (eitherDecode raw)
   message <- either (fail . ("request is not JSON-RPC: " ++)) pure (parseJsonRpcMessage jsonValue)
-  maybeResponse <- handleMcpMessage goldenServerInfo defaultCacheHints handlers anonymousContext message
+  maybeResponse <- handleMcpMessage goldenServerInfo defaultCacheHints support handlers anonymousContext message
   case maybeResponse of
     Just responseMsg -> pure $ encodeJsonRpcMessage responseMsg
     Nothing          -> fail "expected a response"
 
-goldenCase :: McpServerHandlers -> (FilePath, BSL.ByteString) -> Spec
-goldenCase handlers (name, raw) =
+goldenCase :: NotificationSupport -> McpServerHandlers -> (FilePath, BSL.ByteString) -> Spec
+goldenCase support handlers (name, raw) =
   it name $ do
-    actual <- runCase handlers raw
+    actual <- runCase support handlers raw
     let path = "test/golden/" ++ name ++ ".json"
     exists <- doesFileExist path
     accept <- lookupEnv "GOLDEN_ACCEPT"
@@ -158,5 +166,7 @@ goldenCase handlers (name, raw) =
 
 spec :: Spec
 spec = describe "Golden wire-format fixtures" $ do
-  forM_ cases (goldenCase goldenHandlers)
-  forM_ extendedCases (goldenCase extendedHandlers)
+  forM_ cases (goldenCase noNotificationSupport goldenHandlers)
+  forM_ extendedCases (goldenCase noNotificationSupport extendedHandlers)
+  forM_ notifyingCases
+    (goldenCase (NotificationSupport { supportsLegacyPush = True, supportsListen = True }) goldenHandlers)

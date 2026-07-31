@@ -1,0 +1,1 @@
+{"id":13,"jsonrpc":"2.0","result":{"capabilities":{"prompts":{"listChanged":true},"resources":{"listChanged":true},"tools":{"listChanged":true}},"protocolVersion":"2025-06-18","serverInfo":{"instructions":"Golden fixture server","name":"Golden Server","version":"1.0.0"}}}

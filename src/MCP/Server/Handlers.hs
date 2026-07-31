@@ -151,11 +151,12 @@ decorateModern serverInfo hints method resp = case responseResult resp of
 -- under the revision negotiated by @initialize@.
 handleMcpMessage :: McpServerInfo
                  -> CacheHints
+                 -> NotificationSupport
                  -> McpServerHandlers
                  -> ClientContext
                  -> JsonRpcMessage
                  -> IO (Maybe JsonRpcMessage)
-handleMcpMessage serverInfo hints handlers ctx0 (JsonRpcMessageRequest req) = do
+handleMcpMessage serverInfo hints notifSupport handlers ctx0 (JsonRpcMessageRequest req) = do
   let params = requestParams req
       declaredVersion = metaProtocolVersion params
   case declaredVersion of
@@ -184,9 +185,9 @@ handleMcpMessage serverInfo hints handlers ctx0 (JsonRpcMessageRequest req) = do
                     <> " (not part of protocol revision " <> fromMaybe "" declaredVersion <> ")"
                 , errorData = Nothing
                 }
-        "initialize" -> handleInitialize serverInfo handlers req
+        "initialize" -> handleInitialize serverInfo notifSupport handlers req
         "ping" -> handlePing req
-        "server/discover" -> handleServerDiscover serverInfo handlers req
+        "server/discover" -> handleServerDiscover serverInfo notifSupport handlers req
         "prompts/list" -> handlePromptsList handlers ctx req
         "prompts/get" -> handlePromptsGet handlers ctx req
         "resources/list" -> handleResourcesList handlers ctx req
@@ -205,7 +206,7 @@ handleMcpMessage serverInfo hints handlers ctx0 (JsonRpcMessageRequest req) = do
             else response
       return $ Just $ JsonRpcMessageResponse response'
 
-handleMcpMessage _ _ _ _ (JsonRpcMessageNotification notif) = do
+handleMcpMessage _ _ _ _ _ (JsonRpcMessageNotification notif) = do
   case notificationMethod notif of
     "notifications/initialized" ->
       hPutStrLn stderr "Received initialized notification - server is ready for operation"
@@ -213,12 +214,12 @@ handleMcpMessage _ _ _ _ (JsonRpcMessageNotification notif) = do
       hPutStrLn stderr $ "Received unknown notification: " ++ T.unpack (notificationMethod notif)
   return Nothing
 
-handleMcpMessage _ _ _ _ (JsonRpcMessageResponse _) =
+handleMcpMessage _ _ _ _ _ (JsonRpcMessageResponse _) =
   return Nothing
 
 -- | Handle initialize request
-handleInitialize :: McpServerInfo -> McpServerHandlers -> JsonRpcRequest -> IO JsonRpcResponse
-handleInitialize serverInfo handlers req = do
+handleInitialize :: McpServerInfo -> NotificationSupport -> McpServerHandlers -> JsonRpcRequest -> IO JsonRpcResponse
+handleInitialize serverInfo notifSupport handlers req = do
   case requestParams req of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
       { errorCode = -32602
@@ -245,7 +246,11 @@ handleInitialize serverInfo handlers req = do
               hPutStrLn stderr $ "Client version: " ++ T.unpack clientVersion ++ ", using: " ++ T.unpack negotiatedVersion
               let response = InitializeResponse
                     { initRespProtocolVersion = negotiatedVersion
-                    , initRespCapabilities = handlerCapabilities handlers
+                    -- Legacy clients can only receive pushed notifications
+                    -- where the transport supports it (stdio); the modern
+                    -- subscribe mechanism is not part of their revision.
+                    , initRespCapabilities =
+                        handlerCapabilities (supportsLegacyPush notifSupport) False handlers
                     , initRespServerInfo = serverInfo
                     }
               return $ makeSuccessResponse (requestId req) (toJSON response)
@@ -253,17 +258,26 @@ handleInitialize serverInfo handlers req = do
 -- | Only advertise a capability that actually has a handler.
 -- Advertising e.g. "prompts" while prompts/list returns an error
 -- makes strict clients (e.g. Crush) drop the whole server.
-handlerCapabilities :: McpServerHandlers -> ServerCapabilities
-handlerCapabilities handlers = ServerCapabilities
-  { capabilityPrompts   = PromptCapabilities { promptListChanged = Nothing } <$ prompts handlers
+--
+-- The flags say whether change notifications (@listChanged@) and resource
+-- update subscriptions (@subscribe@) are deliverable to the requesting
+-- client — which depends on transport and era, so callers decide.
+handlerCapabilities :: Bool -> Bool -> McpServerHandlers -> ServerCapabilities
+handlerCapabilities listChanged subscribe handlers = ServerCapabilities
+  { capabilityPrompts   = PromptCapabilities { promptListChanged = flag listChanged } <$ prompts handlers
   , capabilityResources =
       if isJust (resources handlers) || isJust (resourceTemplates handlers)
-        then Just ResourceCapabilities { resourceSubscribe = Nothing, resourceListChanged = Nothing }
+        then Just ResourceCapabilities
+              { resourceSubscribe = flag subscribe
+              , resourceListChanged = flag listChanged
+              }
         else Nothing
-  , capabilityTools     = ToolCapabilities { toolListChanged = Nothing } <$ tools handlers
+  , capabilityTools     = ToolCapabilities { toolListChanged = flag listChanged } <$ tools handlers
   , capabilityCompletions = CompletionCapabilities <$ completions handlers
   , capabilityLogging   = Nothing  -- Not supported yet
   }
+  where
+    flag b = if b then Just True else Nothing
 
 -- | Handle ping request
 handlePing :: JsonRpcRequest -> IO JsonRpcResponse
@@ -274,11 +288,14 @@ handlePing req = return $ makeSuccessResponse (requestId req) (toJSON PongRespon
 -- Also serves as the stdio backwards-compatibility probe. The modern result
 -- envelope (resultType, serverInfo _meta, cacheability) is stamped on by
 -- 'decorateModern'.
-handleServerDiscover :: McpServerInfo -> McpServerHandlers -> JsonRpcRequest -> IO JsonRpcResponse
-handleServerDiscover serverInfo handlers req = do
-  let result = object $
+handleServerDiscover :: McpServerInfo -> NotificationSupport -> McpServerHandlers -> JsonRpcRequest -> IO JsonRpcResponse
+handleServerDiscover serverInfo notifSupport handlers req = do
+  -- Modern clients receive notifications via subscriptions/listen, so both
+  -- listChanged and subscribe hinge on that being served.
+  let listen = supportsListen notifSupport
+      result = object $
         [ "supportedVersions" .= allVersions
-        , "capabilities" .= handlerCapabilities handlers
+        , "capabilities" .= handlerCapabilities listen listen handlers
         ] ++ (if T.null (serverInstructions serverInfo)
                 then []
                 else ["instructions" .= serverInstructions serverInfo])

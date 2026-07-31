@@ -11,6 +11,7 @@ import qualified Spec.UnicodeHandling
 import qualified Spec.GoldenWire
 import qualified Spec.ModernEra
 import qualified Spec.ProtocolVersionNegotiation
+import qualified Spec.Subscriptions
 import qualified Spec.TemplatesCompletions
 import qualified Spec.ToolCallParsing
 import qualified Spec.TypedArgs
@@ -26,6 +27,7 @@ main = hspec $ do
     Spec.GoldenWire.spec
     Spec.ModernEra.spec
     Spec.ProtocolVersionNegotiation.spec
+    Spec.Subscriptions.spec
     Spec.TemplatesCompletions.spec
     Spec.ToolCallParsing.spec
     Spec.TypedArgs.spec

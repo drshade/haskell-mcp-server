@@ -52,6 +52,7 @@ runReq handlers method params =
   handleMcpMessage
     (McpServerInfo "T" "1" "")
     defaultCacheHints
+    noNotificationSupport
     handlers
     anonymousContext
     (JsonRpcMessageRequest (JsonRpcRequest "2.0" (RequestIdNumber 1) method params))
