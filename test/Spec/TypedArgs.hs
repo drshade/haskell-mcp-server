@@ -119,6 +119,12 @@ spec = describe "Typed tool arguments" $ do
           toolResultContent tr `shouldBe` [ContentText "boom"]
         Left err -> expectationFailure $ "Expected isError result but got protocol error: " ++ show err
 
+  describe "ToToolResult list semantics" $ do
+    it "propagates isError when merging a list of results" $ do
+      let merged = toToolResult [toolError "boom", toolResult [ContentText "ok"]]
+      toolResultIsError merged `shouldBe` True
+      toolResultContent merged `shouldBe` [ContentText "boom", ContentText "ok"]
+
   describe "Multi-message prompts" $ do
     it "returns a described multi-message conversation with roles" $ do
       result <- snd convHandlers anonCtx "conversation" (promptArgsMap [("topic", "haskell")])

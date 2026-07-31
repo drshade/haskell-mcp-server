@@ -40,8 +40,8 @@ import qualified Data.ByteString.Lazy as BSL
 import           Data.Foldable        (toList)
 import           Data.Map             (Map)
 import qualified Data.Map             as Map
-import           Data.Scientific      (floatingOrInteger, toBoundedInteger,
-                                       toRealFloat)
+import           Data.Scientific      (base10Exponent, floatingOrInteger,
+                                       toBoundedInteger, toRealFloat)
 import           Data.Text            (Text)
 import qualified Data.Text            as T
 import qualified Data.Text.Encoding   as TE
@@ -103,9 +103,16 @@ valueInt (String t) = parseInt t
 valueInt v          = Left $ "Failed to parse Int from: " <> renderValue v
 
 valueInteger :: Value -> Either Text Integer
-valueInteger (Number n) = case floatingOrInteger n :: Either Double Integer of
-  Right i -> Right i
-  Left _  -> Left $ "Failed to parse Integer from: " <> renderValue (Number n)
+valueInteger (Number n)
+  -- Bound the exponent before materializing the Integer: aeson keeps huge
+  -- exponents compact, so a tiny payload like 1e1000000000 would otherwise
+  -- allocate a billion-digit Integer (same bound aeson itself uses for its
+  -- FromJSON Integer instance).
+  | base10Exponent n > 1024 =
+      Left "Failed to parse Integer: exponent too large"
+  | otherwise = case floatingOrInteger n :: Either Double Integer of
+      Right i -> Right i
+      Left _  -> Left $ "Failed to parse Integer from: " <> renderValue (Number n)
 valueInteger (String t) = parseInteger t
 valueInteger v          = Left $ "Failed to parse Integer from: " <> renderValue v
 

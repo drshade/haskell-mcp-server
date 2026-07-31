@@ -24,7 +24,7 @@ import           System.IO                (hPutStrLn, stderr)
 
 import           MCP.Server.Handlers
 import           MCP.Server.JsonRpc
-import           MCP.Server.Protocol (protocolVersion, supportedVersions)
+import           MCP.Server.Protocol (supportedVersions)
 import           MCP.Server.Types
 
 -- | HTTP transport configuration following the MCP Streamable HTTP specification
@@ -90,12 +90,14 @@ mcpApplication config serverInfo handlers req respond0 = do
 
   let origin = lookup hOrigin (Wai.requestHeaders req)
       -- Every response carries exactly one Access-Control-Allow-Origin header:
-      -- the validated request origin when a policy is configured, "*" otherwise.
-      corsValue = case (httpAllowedOrigins config, origin) of
-        (Just _, Just o) -> o
-        _                -> "*"
-      addCors hs = ("Access-Control-Allow-Origin", corsValue)
-                 : filter ((/= "Access-Control-Allow-Origin") . fst) hs
+      -- the validated request origin when a policy is configured, "*"
+      -- otherwise. When the value depends on the request origin, Vary: Origin
+      -- keeps shared caches from serving one origin's response to another.
+      corsHeaders = case (httpAllowedOrigins config, origin) of
+        (Just _, Just o) -> [("Access-Control-Allow-Origin", o), ("Vary", "Origin")]
+        _                -> [("Access-Control-Allow-Origin", "*")]
+      addCors hs = corsHeaders
+                 ++ filter ((/= "Access-Control-Allow-Origin") . fst) hs
       respond = respond0 . Wai.mapResponseHeaders addCors
 
   -- Origin validation first (DNS-rebinding protection, a MUST in the spec).
@@ -170,25 +172,6 @@ handleMcpRequest config serverInfo handlers ctx req respond = do
         (encode $ object ["error" .= ("Unsupported protocol version. Supported versions: " <> T.intercalate ", " supportedVersions)])
     else
         case Wai.requestMethod req of
-          -- GET requests for endpoint discovery
-          "GET" -> do
-            let discoveryResponse = object
-                  [ "name" .= serverName serverInfo
-                  , "version" .= serverVersion serverInfo
-                  , "description" .= serverInstructions serverInfo
-                  , "protocolVersion" .= protocolVersion
-                  , "capabilities" .= object
-                      [ "tools" .= object []
-                      , "prompts" .= object []
-                      , "resources" .= object []
-                      ]
-                  ]
-            logVerbose config $ "Sending server discovery response: " ++ show discoveryResponse
-            respond $ Wai.responseLBS
-              status200
-              [("Content-Type", "application/json")]
-              (encode discoveryResponse)
-
           -- POST requests for JSON-RPC messages
           "POST" -> do
             logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
@@ -197,15 +180,17 @@ handleMcpRequest config serverInfo handlers ctx req respond = do
           -- OPTIONS for CORS preflight
           "OPTIONS" -> respond $ Wai.responseLBS
             status200
-            [ ("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            [ ("Access-Control-Allow-Methods", "POST, OPTIONS")
             , ("Access-Control-Allow-Headers", "Content-Type, Authorization, MCP-Protocol-Version")
             ]
             ""
 
-          -- Unsupported methods
+          -- Everything else, including GET: the MCP endpoint only speaks
+          -- JSON-RPC over POST (this library does not offer server-initiated
+          -- SSE streams, and revision 2026-07-28 requires 405 for GET).
           _ -> respond $ Wai.responseLBS
             status405
-            [("Content-Type", "text/plain"), ("Allow", "GET, POST, OPTIONS")]
+            [("Content-Type", "text/plain"), ("Allow", "POST, OPTIONS")]
             "Method Not Allowed"
 
 -- | True unless the request carries a *present but unsupported*

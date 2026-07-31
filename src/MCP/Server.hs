@@ -4,23 +4,32 @@
 module MCP.Server
   ( -- * Server Runtime
     runMcpServerStdio
+  , runMcpServerStdioWithConfig
   , runMcpServerHttp
   , runMcpServerHttpWithConfig
 
     -- * Transport Configuration
+  , StdioConfig(..)
+  , defaultStdioConfig
   , HttpConfig(..)
 
     -- * Re-exports
   , module MCP.Server.Types
   ) where
 
-import           MCP.Server.Transport.Stdio (transportRunStdio)
+import           MCP.Server.Transport.Stdio (StdioConfig (..), defaultStdioConfig,
+                                             transportRunStdio,
+                                             transportRunStdioWithConfig)
 import           MCP.Server.Transport.Http (HttpConfig(..), transportRunHttp, defaultHttpConfig)
 import           MCP.Server.Types
 
 -- | Run an MCP server using STDIO transport
 runMcpServerStdio :: McpServerInfo -> McpServerHandlers -> IO ()
 runMcpServerStdio = transportRunStdio
+
+-- | Run an MCP server using STDIO transport with custom configuration
+runMcpServerStdioWithConfig :: StdioConfig -> McpServerInfo -> McpServerHandlers -> IO ()
+runMcpServerStdioWithConfig = transportRunStdioWithConfig
 
 -- | Run an MCP server using HTTP transport with default configuration
 runMcpServerHttp :: McpServerInfo -> McpServerHandlers -> IO ()

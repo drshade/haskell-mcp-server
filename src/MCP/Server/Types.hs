@@ -67,7 +67,7 @@ import           Data.Aeson.Key   (fromText)
 import qualified Data.Aeson.KeyMap as KM
 import           Data.Aeson.Types (Pair, Parser)
 import           Data.Map         (Map)
-import           Data.Maybe       (catMaybes)
+import           Data.Maybe       (catMaybes, listToMaybe)
 import           Data.Text        (Text)
 import qualified Data.Text        as T
 import           GHC.Generics     (Generic)
@@ -240,16 +240,23 @@ instance ToToolResult ToolResult where
 instance ToToolResult Content where
   toToolResult c = toolResult [c]
 
+-- | Concatenates content; a merged result is an error if any element is
+-- ('toolResultIsError' is OR-ed), and the first present 'structuredContent'
+-- and @_meta@ are kept.
 instance ToToolResult a => ToToolResult [a] where
   toToolResult xs = ToolResult
-    { toolResultContent = concatMap (toolResultContent . toToolResult) xs
-    , toolResultStructured = Nothing
-    , toolResultIsError = False
-    , toolResultMeta = Nothing
+    { toolResultContent = concatMap toolResultContent rs
+    , toolResultStructured = firstJust (map toolResultStructured rs)
+    , toolResultIsError = any toolResultIsError rs
+    , toolResultMeta = firstJust (map toolResultMeta rs)
     }
+    where rs = map toToolResult xs
 
 instance ToToolResult Text where
   toToolResult = toToolResult . ContentText
+
+firstJust :: [Maybe a] -> Maybe a
+firstJust = listToMaybe . catMaybes
 
 -- | The full result of a prompts/get request: an optional description and
 -- a conversation of one or more messages.
@@ -270,8 +277,12 @@ instance ToPromptResult PromptResult where
 instance ToPromptResult PromptMessage where
   toPromptResult m = PromptResult Nothing [m]
 
+-- | Concatenates messages and keeps the first present description.
 instance ToPromptResult a => ToPromptResult [a] where
-  toPromptResult xs = PromptResult Nothing (concatMap (promptResultMessages . toPromptResult) xs)
+  toPromptResult xs = PromptResult
+    (firstJust (map promptResultDescription rs))
+    (concatMap promptResultMessages rs)
+    where rs = map toPromptResult xs
 
 instance ToPromptResult Content where
   toPromptResult c = toPromptResult (PromptMessage RoleUser c)

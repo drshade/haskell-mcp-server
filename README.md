@@ -258,10 +258,11 @@ application; the library only threads the identity through:
 
 **Features:**
 - CORS enabled for web clients
-- GET `/mcp` for server discovery
-- POST `/mcp` for JSON-RPC messages
+- POST `/mcp` for JSON-RPC messages (GET returns 405 — this library does not
+  offer server-initiated SSE streams)
 - Protocol-version negotiation across supported revisions (`2024-11-05`–`2025-11-25`)
 - Optional pluggable bearer-token authentication via `httpAuthorize`
+- Origin validation via `httpAllowedOrigins`
 
 ## Examples
 

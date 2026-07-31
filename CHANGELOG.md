@@ -39,6 +39,10 @@ boundary is no longer stringly typed.
 * stdio: a blank line on stdin no longer terminates the server, EOF shuts
   down cleanly instead of crashing, and malformed input is answered with
   proper JSON-RPC error responses (`-32700`/`-32600`, `id: null`).
+* stdio: raw request bodies are no longer logged to stderr by default
+  (tool arguments may carry sensitive data) — only message summaries.
+  `runMcpServerStdioWithConfig` with `stdioVerbose = True` restores full
+  body logging.
 * JSON-RPC: messages are classified by shape (method/id presence) instead
   of parse-fallthrough, so a request with a malformed `id` is answered
   with an error rather than silently dropped as a notification. Request
@@ -47,8 +51,15 @@ boundary is no longer stringly typed.
   validation / DNS-rebinding protection, a spec MUST); accepted
   notifications return `202` with no body; malformed bodies get JSON-RPC
   error responses; the `Access-Control-Allow-Origin` header is set
-  consistently on every response and echoes the validated origin when a
-  policy is configured.
+  consistently on every response and echoes the validated origin (with
+  `Vary: Origin`) when a policy is configured.
+* HTTP (BREAKING): the non-spec GET "discovery" endpoint is removed — the
+  MCP endpoint now answers GET with `405 Method Not Allowed`, matching the
+  spec (no revision defines a GET discovery response, and `2026-07-28`
+  requires 405 here).
+* Integer tool arguments bound the scientific-notation exponent (1024, the
+  same bound aeson uses) so a tiny payload like `1e1000000000` cannot force
+  allocation of a gigabyte-sized `Integer`.
 
 ## 0.1.0.21 - ???
 

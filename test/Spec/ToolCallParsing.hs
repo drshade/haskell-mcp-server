@@ -3,6 +3,7 @@
 
 module Spec.ToolCallParsing (spec) where
 
+import Data.Aeson (Value (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import MCP.Server
@@ -145,3 +146,14 @@ spec = describe "Tool call parsing" $ do
       shouldBeMissingParams
         (callTool "required_fields" [("rfText", "hello")])
         "is missing"
+
+  describe "Integer exponent bound" $ do
+    -- Regression: aeson keeps huge exponents compact, so without a bound a
+    -- ~13-byte payload like 1e100000 would materialize a 100001-digit Integer.
+    it "rejects huge exponents without materializing the Integer" $ do
+      result <- snd allTypesHandlers anonCtx "optional_fields"
+        (valueArgs [("ofInteger", Number (read "1e100000"))])
+      case result of
+        Left (InvalidParams msg) ->
+          msg `shouldSatisfy` T.isInfixOf "exponent too large"
+        other -> expectationFailure $ "Expected InvalidParams but got: " ++ show other
