@@ -1,0 +1,1 @@
+{"id":29,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"Golden Server","version":"1.0.0"}},"cacheScope":"private","resourceTemplates":[{"description":"An item","mimeType":"text/plain","name":"item","uriTemplate":"resource://item/{itemId}"}],"resultType":"complete","ttlMs":0}}

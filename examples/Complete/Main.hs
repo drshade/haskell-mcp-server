@@ -3,6 +3,8 @@
 
 module Main where
 
+import           Data.Map  (Map)
+import           Data.Text (Text)
 import qualified Data.Text as T
 import           MCP.Server
 import           MCP.Server.Derive
@@ -24,6 +26,8 @@ handleResource _ uri SaleItems =
     pure $ ResourceText uri "text/plain" "Organic Apples $2.99/lb, Free Range Eggs $4.50/dozen, Artisan Bread $3.25/loaf"
 handleResource _ uri HeadlineBannerAd =
     pure $ ResourceText uri "text/plain" "🛒 Weekly Special: 20% off all organic produce! 🥕🥬🍎"
+handleResource _ uri (ProductDetail sku) =
+    pure $ ResourceText uri "text/plain" $ "Details for product " <> sku <> ": in stock, $9.99"
 
 -- Tool handlers return a full ToolResult: execution failures are reported
 -- with isError so the model can see them (returning plain Content works too
@@ -49,6 +53,13 @@ handleTool _ (ComplexTool field1 field2 field3 field4 field5) =
                         maybe "" (", " <>) field3 <> ", " <> field4 <>
                         maybe "" (", " <>) field5]
 
+-- Argument autocompletion for the Recipe prompt's idea argument
+handleComplete :: ClientContext -> CompletionRef -> ArgumentName -> Text -> Map Text Text -> IO (Either Error CompletionResult)
+handleComplete _ (CompletionRefPrompt "recipe") "idea" partial _ =
+    pure $ Right $ completionResult $
+        filter (T.isPrefixOf (T.toLower partial)) ["pancakes", "pasta", "pizza"]
+handleComplete _ _ _ _ _ = pure $ Right $ completionResult []
+
 main :: IO ()
 main = do
     -- Set UTF-8 encoding to handle Unicode characters properly
@@ -57,6 +68,7 @@ main = do
     -- Derive the handlers using Template Haskell
     let prompts = $(derivePromptHandler ''MyPrompt 'handlePrompt)
         resources = $(deriveResourceHandler ''MyResource 'handleResource)
+        templates = $(deriveResourceTemplates ''MyResource)
         tools = $(deriveToolHandler ''MyTool 'handleTool)
      in runMcpServerStdio
         McpServerInfo
@@ -64,8 +76,10 @@ main = do
             , serverVersion = "0.3.0"
             , serverInstructions = "An example MCP server that handles prompts, resources, and tools."
             }
-        McpServerHandlers
+        noHandlers
             { prompts = Just prompts
             , resources = Just resources
+            , resourceTemplates = Just templates
             , tools = Just tools
+            , completions = Just handleComplete
             }
