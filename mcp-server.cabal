@@ -90,6 +90,7 @@ library
     containers >=0.6 && <0.9,
     http-types >=0.12 && <1,
     network-uri >=2.6 && <2.8,
+    scientific >=0.3 && <0.4,
     template-haskell >=2.16 && <2.25,
     text >=1.2 && <3,
     wai >=3.2 && <4,
