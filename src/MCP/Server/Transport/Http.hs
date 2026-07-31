@@ -45,6 +45,15 @@ data HttpConfig = HttpConfig
       --   handler 'ClientContext' as 'clientPrincipal' — while 'Nothing' rejects
       --   the request with @401@. Validation and principal assignment are left
       --   entirely to the caller.
+  , httpAllowedOrigins :: Maybe [Text]
+      -- ^ Origin-validation policy (DNS-rebinding protection; the MCP
+      --   Streamable HTTP spec requires servers to validate the @Origin@
+      --   header). @'Just' origins@ rejects any request whose @Origin@ header
+      --   is present but not in the list with @403@, and echoes the allowed
+      --   origin in CORS headers instead of @*@. Requests without an @Origin@
+      --   header (non-browser clients) are always allowed. 'Nothing' disables
+      --   the check — only appropriate when the server is not reachable from
+      --   a browser (e.g. bound to localhost for CLI clients).
   }
 
 -- | Default HTTP configuration (authentication disabled).
@@ -55,6 +64,7 @@ defaultHttpConfig = HttpConfig
   , httpEndpoint = "/mcp"
   , httpVerbose = False
   , httpAuthorize = Nothing
+  , httpAllowedOrigins = Nothing
   }
 
 -- | Helper for conditional logging
@@ -74,32 +84,61 @@ transportRunHttp config serverInfo handlers = do
 
 -- | WAI Application for MCP over HTTP
 mcpApplication :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> Wai.Application
-mcpApplication config serverInfo handlers req respond = do
+mcpApplication config serverInfo handlers req respond0 = do
   -- Log the request
   logVerbose config $ "HTTP " ++ show (Wai.requestMethod req) ++ " " ++ T.unpack (TE.decodeUtf8 $ Wai.rawPathInfo req)
 
-  -- Authenticate and obtain the caller's principal (if any) before anything
-  -- else. CORS preflight requests are exempt: browsers never attach
-  -- credentials to an OPTIONS preflight, and the preflight response is what
-  -- tells the browser it may send the Authorization header at all.
-  decision <- case httpAuthorize config of
-    _ | Wai.requestMethod req == "OPTIONS"
-               -> pure (Just Nothing)      -- CORS preflight: no credentials
-    Nothing    -> pure (Just Nothing)      -- auth disabled: allowed, no principal
-    Just check -> fmap (fmap Just) (check (bearerToken req))
-  case decision of
-    Nothing -> do
-      logVerbose config "Request rejected by authorization callback"
-      respond $ Wai.responseLBS
-        status401
-        [("Content-Type", "application/json"), ("WWW-Authenticate", "Bearer")]
-        (encode $ object ["error" .= ("Unauthorized" :: Text)])
-    Just principal -> do
-      let ctx = ClientContext { clientToken = bearerToken req, clientPrincipal = principal }
-      -- Check if this is our MCP endpoint
-      if TE.decodeUtf8 (Wai.rawPathInfo req) == T.pack (httpEndpoint config)
-        then handleMcpRequest config serverInfo handlers ctx req respond
-        else respond $ Wai.responseLBS status404 [("Content-Type", "text/plain")] "Not Found"
+  let origin = lookup hOrigin (Wai.requestHeaders req)
+      -- Every response carries exactly one Access-Control-Allow-Origin header:
+      -- the validated request origin when a policy is configured, "*" otherwise.
+      corsValue = case (httpAllowedOrigins config, origin) of
+        (Just _, Just o) -> o
+        _                -> "*"
+      addCors hs = ("Access-Control-Allow-Origin", corsValue)
+                 : filter ((/= "Access-Control-Allow-Origin") . fst) hs
+      respond = respond0 . Wai.mapResponseHeaders addCors
+
+  -- Origin validation first (DNS-rebinding protection, a MUST in the spec).
+  if not (originAllowed config req)
+    then do
+      logVerbose config $ "Request rejected: disallowed Origin " ++ show origin
+      respond0 $ Wai.responseLBS
+        status403
+        [("Content-Type", "application/json")]
+        (encode $ object ["error" .= ("Origin not allowed" :: Text)])
+    else do
+      -- Authenticate and obtain the caller's principal (if any) before anything
+      -- else. CORS preflight requests are exempt: browsers never attach
+      -- credentials to an OPTIONS preflight, and the preflight response is what
+      -- tells the browser it may send the Authorization header at all.
+      decision <- case httpAuthorize config of
+        _ | Wai.requestMethod req == "OPTIONS"
+                   -> pure (Just Nothing)      -- CORS preflight: no credentials
+        Nothing    -> pure (Just Nothing)      -- auth disabled: allowed, no principal
+        Just check -> fmap (fmap Just) (check (bearerToken req))
+      case decision of
+        Nothing -> do
+          logVerbose config "Request rejected by authorization callback"
+          respond $ Wai.responseLBS
+            status401
+            [("Content-Type", "application/json"), ("WWW-Authenticate", "Bearer")]
+            (encode $ object ["error" .= ("Unauthorized" :: Text)])
+        Just principal -> do
+          let ctx = ClientContext { clientToken = bearerToken req, clientPrincipal = principal }
+          -- Check if this is our MCP endpoint
+          if TE.decodeUtf8 (Wai.rawPathInfo req) == T.pack (httpEndpoint config)
+            then handleMcpRequest config serverInfo handlers ctx req respond
+            else respond $ Wai.responseLBS status404 [("Content-Type", "text/plain")] "Not Found"
+
+-- | Whether the request passes the configured Origin policy: with no policy
+-- everything passes; with a policy, a present Origin header must be in the
+-- allow-list (absent Origin means a non-browser client and always passes).
+originAllowed :: HttpConfig -> Wai.Request -> Bool
+originAllowed config req = case httpAllowedOrigins config of
+  Nothing      -> True
+  Just allowed -> case lookup hOrigin (Wai.requestHeaders req) of
+    Nothing -> True
+    Just o  -> TE.decodeUtf8With lenientDecode o `elem` allowed
 
 -- | The bearer token presented by a request, if any: the value following
 -- @Authorization: Bearer @. The scheme is matched case-insensitively per
@@ -147,7 +186,7 @@ handleMcpRequest config serverInfo handlers ctx req respond = do
             logVerbose config $ "Sending server discovery response: " ++ show discoveryResponse
             respond $ Wai.responseLBS
               status200
-              [("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*")]
+              [("Content-Type", "application/json")]
               (encode discoveryResponse)
 
           -- POST requests for JSON-RPC messages
@@ -158,8 +197,7 @@ handleMcpRequest config serverInfo handlers ctx req respond = do
           -- OPTIONS for CORS preflight
           "OPTIONS" -> respond $ Wai.responseLBS
             status200
-            [ ("Access-Control-Allow-Origin", "*")
-            , ("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            [ ("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
             , ("Access-Control-Allow-Headers", "Content-Type, Authorization, MCP-Protocol-Version")
             ]
             ""
@@ -196,7 +234,11 @@ handleJsonRpcRequest config serverInfo handlers ctx body respond = do
       respond $ Wai.responseLBS
         status400
         [("Content-Type", "application/json")]
-        (encode $ object ["error" .= ("Invalid JSON" :: Text)])
+        (encode $ makeErrorResponse RequestIdNull $ JsonRpcError
+          { errorCode = -32700
+          , errorMessage = "Parse error"
+          , errorData = Nothing
+          })
 
     Right jsonValue -> handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond
 
@@ -209,7 +251,11 @@ handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond = do
       respond $ Wai.responseLBS
         status400
         [("Content-Type", "application/json")]
-        (encode $ object ["error" .= ("Invalid JSON-RPC" :: Text)])
+        (encode $ makeErrorResponse RequestIdNull $ JsonRpcError
+          { errorCode = -32600
+          , errorMessage = "Invalid Request"
+          , errorData = Nothing
+          })
 
     Right message -> do
       logVerbose config $ "Processing HTTP message: " ++ show (getMessageSummary message)
@@ -221,13 +267,10 @@ handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond = do
           logVerbose config $ "Sending HTTP response for: " ++ show (getMessageSummary message)
           respond $ Wai.responseLBS
             status200
-            [("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*")]
+            [("Content-Type", "application/json")]
             responseJson
 
         Nothing -> do
           logVerbose config $ "No response needed for: " ++ show (getMessageSummary message)
-          -- For notifications, return 200 with empty JSON object (per MCP spec)
-          respond $ Wai.responseLBS
-            status200
-            [("Content-Type", "application/json"), ("Access-Control-Allow-Origin", "*")]
-            "{}"
+          -- Accepted notification: 202 with no body, per the Streamable HTTP spec
+          respond $ Wai.responseLBS status202 [] ""
