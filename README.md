@@ -14,7 +14,9 @@ A fully-featured Haskell library for building [Model Context Protocol (MCP)](htt
 
 - ✅ **Prompts**: User-controlled prompt templates with arguments
 - ✅ **Resources**: Application-controlled readable resources
+- ✅ **Resource Templates**: Parameterized resources via URI templates
 - ✅ **Tools**: Model-controlled callable functions
+- ✅ **Completions**: Argument autocompletion for prompts and templates
 - ✅ **Initialization Flow**: Complete protocol lifecycle with version negotiation
 - ✅ **Error Handling**: Comprehensive error types and JSON-RPC error responses
 
@@ -153,6 +155,44 @@ Resources automatically get `resource://` URIs based on constructor names:
 data MyResource = Menu | Specials
 -- Generates: "resource://menu", "resource://specials"
 ```
+
+#### Resource Templates
+
+Record constructors become parameterized resource *templates* (RFC 6570 URI
+templates), with one percent-decoded path segment per field:
+
+```haskell
+data MyResource
+    = Menu                                            -- static: resource://menu
+    | ProductDetail { sku :: Text }                   -- resource://product_detail/{sku}
+    | OrderItem { orderId :: Int, itemName :: Text }  -- resource://order_item/{orderId}/{itemName}
+```
+
+The read handler derived by `deriveResourceHandler` matches template URIs
+(e.g. `resource://product_detail/ABC123`) and decodes the segments into the
+constructor's fields — typed fields like `Int` are parsed, and a failing
+segment yields an invalid-params error. Advertise the templates via
+`resources/templates/list` with:
+
+```haskell
+resourceTemplates = Just $(deriveResourceTemplates ''MyResource)
+```
+
+#### Argument Completion
+
+Provide a `completions` handler to serve `completion/complete` for prompt
+arguments and resource-template parameters:
+
+```haskell
+handleComplete :: ClientContext -> CompletionRef -> ArgumentName -> Text -> Map Text Text -> IO (Either Error CompletionResult)
+handleComplete _ (CompletionRefPrompt "recipe") "idea" partial _ =
+    pure $ Right $ completionResult $
+        filter (T.isPrefixOf partial) ["pancakes", "pasta", "pizza"]
+handleComplete _ _ _ _ _ = pure $ Right $ completionResult []
+```
+
+The `completions` capability is advertised automatically when the handler is
+present.
 
 #### Unsupported Patterns
 

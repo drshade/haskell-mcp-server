@@ -220,7 +220,7 @@ spec = describe "Unicode Handling" $ do
 
       -- Handlers above ignore the per-request client context
       let ctx = anonymousContext
-      let handlers = McpServerHandlers
+      let handlers = noHandlers
             { prompts = Just (const promptListHandler, const promptGetHandler)
             , resources = Just (const resourceListHandler, const resourceReadHandler)
             , tools = Just (const toolListHandler, const toolCallHandler)

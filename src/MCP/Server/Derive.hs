@@ -16,6 +16,8 @@ module MCP.Server.Derive
   , derivePromptHandlerWithDescription
   , deriveResourceHandler
   , deriveResourceHandlerWithDescription
+  , deriveResourceTemplates
+  , deriveResourceTemplatesWithDescription
   , deriveToolHandler
   , deriveToolHandlerWithDescription
   ) where
@@ -114,10 +116,11 @@ extractFieldsFromParamType paramType = do
     _ -> fail $ "Parameter type must be a concrete type, got: " ++ show paramType
 
 -- Names used to communicate between the generated lambda and its cases
-ctxName, argNameN, argsName :: Name
+ctxName, argNameN, argsName, uriName :: Name
 ctxName  = mkName "ctx"
 argNameN = mkName "name"
 argsName = mkName "args"
+uriName  = mkName "uri"
 
 -------------------------------------------------------------------------------
 -- Value parsers (tool arguments)
@@ -387,6 +390,15 @@ mkDispatchCase style handlerName con = do
 -------------------------------------------------------------------------------
 
 -- | Derive resource handlers from a data type with custom descriptions.
+--
+-- Nullary constructors become static resources
+-- (@Menu -> resource:\/\/menu@). Record constructors become resource
+-- /templates/ (@UserProfile { userId :: Text } ->
+-- resource:\/\/user_profile\/{userId}@): they are excluded from
+-- @resources\/list@ (advertise them with 'deriveResourceTemplates'), and the
+-- read handler matches their URIs by splitting the path into percent-decoded
+-- segments, one per field, in declaration order.
+--
 -- Usage:
 --
 -- > $(deriveResourceHandlerWithDescription ''MyResource 'handleResource [("Constructor", "Description")])
@@ -395,18 +407,17 @@ deriveResourceHandlerWithDescription typeName handlerName descriptions = do
   cons <- reifyCons typeName
   case cons of
     Just constructors -> do
-      -- Generate resource definitions
-      resourceDefs <- traverse (mkResourceDefWithDescription descriptions) constructors
+      -- Static resource definitions: nullary constructors only
+      resourceDefs <- traverse (mkResourceDefWithDescription descriptions)
+                               (filter isNullary constructors)
       listHandlerExp <- [| \_ctx -> pure $(return $ ListE resourceDefs) |]
 
-      -- Generate read handler with cases
-      cases <- traverse (mkResourceCase handlerName) constructors
-      defaultCase <- [| pure $ Left $ ResourceNotFound $ "Resource not found: " <> T.pack unknown |]
-      let defaultMatch = Match (VarP (mkName "unknown")) (NormalB defaultCase) []
-
-      let readHandlerExp = LamE [VarP ctxName, VarP (mkName "uri")] $
-            CaseE (AppE (VarE 'show) (VarE (mkName "uri")))
-              (map clauseToMatch cases ++ [defaultMatch])
+      -- Read handler: a chain of alternatives over every constructor,
+      -- falling through to ResourceNotFound
+      let fallbackQ = [| pure $ Left $ ResourceNotFound $
+                           "Resource not found: " <> T.pack (show $(varE uriName)) |]
+      readBody <- foldr (mkResourceAlt handlerName) fallbackQ constructors
+      let readHandlerExp = LamE [VarP ctxName, VarP uriName] readBody
 
       return $ TupE [Just listHandlerExp, Just readHandlerExp]
     Nothing -> fail $ "deriveResourceHandlerWithDescription: " ++ show typeName ++ " is not a data type"
@@ -418,6 +429,50 @@ deriveResourceHandlerWithDescription typeName handlerName descriptions = do
 deriveResourceHandler :: Name -> Name -> Q Exp
 deriveResourceHandler typeName handlerName =
   deriveResourceHandlerWithDescription typeName handlerName []
+
+-- | Derive a 'ResourceTemplateListHandler' advertising the record
+-- constructors of a resource type as URI templates, with custom
+-- descriptions. Usage:
+--
+-- > $(deriveResourceTemplatesWithDescription ''MyResource [("Constructor", "Description")])
+deriveResourceTemplatesWithDescription :: Name -> [(String, String)] -> Q Exp
+deriveResourceTemplatesWithDescription typeName descriptions = do
+  cons <- reifyCons typeName
+  case cons of
+    Just constructors -> do
+      templateDefs <- traverse (mkTemplateDefWithDescription descriptions)
+                               [c | c@(RecC _ _) <- constructors]
+      [| \_ctx -> pure $(return $ ListE templateDefs) |]
+    Nothing -> fail $ "deriveResourceTemplatesWithDescription: " ++ show typeName ++ " is not a data type"
+
+-- | Derive a 'ResourceTemplateListHandler' from a resource type's record
+-- constructors. Usage:
+--
+-- > $(deriveResourceTemplates ''MyResource)
+deriveResourceTemplates :: Name -> Q Exp
+deriveResourceTemplates typeName =
+  deriveResourceTemplatesWithDescription typeName []
+
+-- The URI-template string for a record constructor:
+-- resource://user_profile/{userId}/{...}
+templateURI :: Name -> [(Name, Bang, Type)] -> String
+templateURI name fields =
+  "resource://" <> snakeName name
+    <> concat ["/{" <> nameBase fn <> "}" | (fn, _, _) <- fields]
+
+mkTemplateDefWithDescription :: [(String, String)] -> Con -> Q Exp
+mkTemplateDefWithDescription _ (RecC name []) =
+  fail $ "Resource template constructors need at least one field: " ++ nameBase name
+mkTemplateDefWithDescription descriptions (RecC name fields) = do
+  let description = descriptionFor descriptions (nameBase name) (nameBase name)
+  [| ResourceTemplateDefinition
+      { resourceTemplateURITemplate = $(litE $ stringL $ templateURI name fields)
+      , resourceTemplateName = $(litE $ stringL $ snakeName name)
+      , resourceTemplateDescription = Just $(litE $ stringL description)
+      , resourceTemplateMimeType = Just "text/plain"
+      , resourceTemplateTitle = Nothing
+      } |]
+mkTemplateDefWithDescription _ _ = fail "Resource templates require record constructors"
 
 mkResourceDefWithDescription :: [(String, String)] -> Con -> Q Exp
 mkResourceDefWithDescription descriptions (NormalC name []) = do
@@ -438,15 +493,49 @@ mkResourceDefWithDescription descriptions (NormalC name []) = do
       } |]
 mkResourceDefWithDescription _ _ = fail "Unsupported constructor type for resources"
 
+-- One alternative of the read handler: try this constructor, else fall
+-- through to the rest of the chain.
+mkResourceAlt :: Name -> Con -> Q Exp -> Q Exp
+mkResourceAlt handlerName con restQ = case con of
+  NormalC name [] -> do
+    let resourceURI = "resource://" <> snakeName name
+    [| if show $(varE uriName) == $(litE $ stringL resourceURI)
+         then Right <$> $(varE handlerName) $(varE ctxName) $(varE uriName) $(conE name)
+         else $restQ |]
+  RecC name [] ->
+    fail $ "Resource template constructors need at least one field: " ++ nameBase name
+  RecC name fields -> do
+    let prefix = "resource://" <> snakeName name <> "/"
+        segsName = mkName "segs"
+    decoder <- mkSegmentsDecoder segsName name fields
+    handled <- [| case $(return decoder) of
+                    Left err -> pure (Left err)
+                    Right v  -> Right <$> $(varE handlerName) $(varE ctxName) $(varE uriName) v |]
+    rest <- restQ
+    matchExp <- [| matchTemplateSegments $(litE $ stringL prefix)
+                     $(litE $ integerL $ fromIntegral $ length fields)
+                     (show $(varE uriName)) |]
+    justP <- conP 'Just [varP segsName]
+    nothingP <- conP 'Nothing []
+    return $ CaseE matchExp
+      [ Match justP (NormalB handled) []
+      , Match nothingP (NormalB rest) []
+      ]
+  _ -> fail "Unsupported constructor type for resources"
 
-mkResourceCase :: Name -> Con -> Q Clause
-mkResourceCase handlerName (NormalC name []) = do
-  let resourceName = T.pack . snakeName $ name
-  let resourceURI = "resource://" <> T.unpack resourceName
-  clause [litP $ stringL resourceURI]
-    (normalB [| Right <$> $(varE handlerName) $(varE ctxName) $(varE (mkName "uri")) $(conE name) |])
-    []
-mkResourceCase _ _ = fail "Unsupported constructor type for resources"
+-- Applicative decode of the matched template segments into the constructor
+mkSegmentsDecoder :: Name -> Name -> [(Name, Bang, Type)] -> Q Exp
+mkSegmentsDecoder segsName con fields =
+  foldl step [| pure $(conE con) |] (zip [0 :: Integer ..] fields)
+  where
+    step acc (i, (fieldName, _, fieldType)) = do
+      let (isOptional, innerType) = unwrapMaybe fieldType
+      if isOptional
+        then fail $ "Maybe fields are not supported in resource templates: " ++ nameBase fieldName
+        else [| $acc <*> templateField $(litE $ stringL $ nameBase fieldName)
+                        $(mkTextParser innerType)
+                        $(varE segsName)
+                        $(litE $ integerL i) |]
 
 -------------------------------------------------------------------------------
 -- Tool derivation

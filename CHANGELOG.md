@@ -38,6 +38,23 @@ both the legacy initialize-handshake revisions and the stateless
   and unsupported revisions HTTP 400, so era-probing clients can
   distinguish them. Legacy requests keep the relaxed pre-2026 rules.
 
+### Resource templates and completions
+
+* Record constructors of a resource type now derive as resource /templates/
+  (`UserProfile { userId :: Text }` →
+  `resource://user_profile/{userId}`): the derived read handler matches
+  template URIs, percent-decodes the path segments, and parses them into
+  the constructor's (typed) fields. `deriveResourceTemplates` derives the
+  `resources/templates/list` handler advertising them; the method carries
+  the modern cacheability envelope.
+* New `completions` handler slot serving `completion/complete` for prompt
+  arguments and resource-template parameters (`CompletionRef`,
+  `CompletionResult`, capped at 100 values per the spec). The
+  `completions` capability is advertised automatically.
+* `McpServerHandlers` gains `resourceTemplates` and `completions` fields;
+  the new `noHandlers` value lets you construct handler sets by record
+  update so future fields don't break your code.
+
 ### Typed tool arguments and results (BREAKING)
 
 * Tool arguments arrive as full JSON values (`Map Text Value`). The Template

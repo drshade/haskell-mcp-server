@@ -34,12 +34,19 @@ module MCP.Server.Types
     -- * Definition Types
   , PromptDefinition(..)
   , ResourceDefinition(..)
+  , ResourceTemplateDefinition(..)
   , ToolDefinition(..)
   , ArgumentDefinition(..)
+
+    -- * Completion Types
+  , CompletionRef(..)
+  , CompletionResult(..)
+  , completionResult
 
     -- * Server Types
   , McpServerInfo(..)
   , McpServerHandlers(..)
+  , noHandlers
   , ClientContext(..)
   , anonymousContext
   , CacheHints(..)
@@ -48,6 +55,7 @@ module MCP.Server.Types
   , PromptCapabilities(..)
   , ResourceCapabilities(..)
   , ToolCapabilities(..)
+  , CompletionCapabilities(..)
   , LoggingCapabilities(..)
 
     -- * Handler Types
@@ -55,8 +63,10 @@ module MCP.Server.Types
   , PromptGetHandler
   , ResourceListHandler
   , ResourceReadHandler
+  , ResourceTemplateListHandler
   , ToolListHandler
   , ToolCallHandler
+  , CompletionHandler
 
     -- * Basic Types
   , PromptName
@@ -419,6 +429,46 @@ instance FromJSON ResourceDefinition where
     <*> o .:? "mimeType"
     <*> o .:? "title"
 
+-- | Resource template definition: a parameterized resource identified by an
+-- RFC 6570 URI template.
+data ResourceTemplateDefinition = ResourceTemplateDefinition
+  { resourceTemplateURITemplate :: Text
+  , resourceTemplateName        :: Text
+  , resourceTemplateDescription :: Maybe Text
+  , resourceTemplateMimeType    :: Maybe Text
+  , resourceTemplateTitle       :: Maybe Text
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON ResourceTemplateDefinition where
+  toJSON def = object $
+    [ "uriTemplate" .= resourceTemplateURITemplate def
+    , "name" .= resourceTemplateName def
+    ] ++
+    maybe [] (\d -> ["description" .= d]) (resourceTemplateDescription def) ++
+    maybe [] (\m -> ["mimeType" .= m]) (resourceTemplateMimeType def) ++
+    maybe [] (\t -> ["title" .= t]) (resourceTemplateTitle def)
+
+-- | What a completion request is completing an argument for.
+data CompletionRef
+  = CompletionRefPrompt Text    -- ^ @ref/prompt@: a prompt, by name
+  | CompletionRefResource Text  -- ^ @ref/resource@: a resource URI or URI template
+  deriving (Show, Eq, Generic)
+
+-- | Completion suggestions for an argument value.
+data CompletionResult = CompletionResult
+  { completionValues  :: [Text]      -- ^ Suggestions ranked by relevance (max 100 are sent)
+  , completionTotal   :: Maybe Int   -- ^ Optional total number of matches
+  , completionHasMore :: Maybe Bool  -- ^ Whether more results exist beyond 'completionValues'
+  } deriving (Show, Eq, Generic)
+
+-- | A completion result with just the given suggestions.
+completionResult :: [Text] -> CompletionResult
+completionResult vals = CompletionResult
+  { completionValues = vals
+  , completionTotal = Nothing
+  , completionHasMore = Nothing
+  }
+
 -- | Tool definition (2025-06-18 enhanced)
 data ToolDefinition = ToolDefinition
   { toolDefinitionName         :: Text
@@ -487,6 +537,13 @@ instance ToJSON ToolCapabilities where
     [ fmap ("listChanged" .=) (toolListChanged caps)
     ]
 
+data CompletionCapabilities = CompletionCapabilities
+  { -- No sub-capabilities defined
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CompletionCapabilities where
+  toJSON _ = object []
+
 data LoggingCapabilities = LoggingCapabilities
   { -- No specific sub-capabilities for logging yet
   } deriving (Show, Eq, Generic)
@@ -496,10 +553,11 @@ instance ToJSON LoggingCapabilities where
 
 -- | Server capabilities
 data ServerCapabilities = ServerCapabilities
-  { capabilityPrompts   :: Maybe PromptCapabilities
-  , capabilityResources :: Maybe ResourceCapabilities
-  , capabilityTools     :: Maybe ToolCapabilities
-  , capabilityLogging   :: Maybe LoggingCapabilities
+  { capabilityPrompts     :: Maybe PromptCapabilities
+  , capabilityResources   :: Maybe ResourceCapabilities
+  , capabilityTools       :: Maybe ToolCapabilities
+  , capabilityCompletions :: Maybe CompletionCapabilities
+  , capabilityLogging     :: Maybe LoggingCapabilities
   } deriving (Show, Eq, Generic)
 
 instance ToJSON ServerCapabilities where
@@ -507,6 +565,7 @@ instance ToJSON ServerCapabilities where
     [ fmap ("prompts" .=) (capabilityPrompts caps)
     , fmap ("resources" .=) (capabilityResources caps)
     , fmap ("tools" .=) (capabilityTools caps)
+    , fmap ("completions" .=) (capabilityCompletions caps)
     , fmap ("logging" .=) (capabilityLogging caps)
     ]
 
@@ -568,13 +627,40 @@ type PromptGetHandler = ClientContext -> PromptName -> Map Text Text -> IO (Eith
 
 type ResourceListHandler = ClientContext -> IO [ResourceDefinition]
 type ResourceReadHandler = ClientContext -> URI -> IO (Either Error ResourceContent)
+type ResourceTemplateListHandler = ClientContext -> IO [ResourceTemplateDefinition]
 
 type ToolListHandler = ClientContext -> IO [ToolDefinition]
 type ToolCallHandler = ClientContext -> ToolName -> Map Text Value -> IO (Either Error ToolResult)
 
+-- | Completion handler: given what is being completed ('CompletionRef'), the
+-- argument name, the partial value typed so far, and any already-resolved
+-- sibling arguments, produce ranked suggestions.
+type CompletionHandler = ClientContext -> CompletionRef -> ArgumentName -> Text -> Map Text Text -> IO (Either Error CompletionResult)
+
 -- | Server handlers
 data McpServerHandlers = McpServerHandlers
-  { prompts   :: Maybe (PromptListHandler, PromptGetHandler)
-  , resources :: Maybe (ResourceListHandler, ResourceReadHandler)
-  , tools     :: Maybe (ToolListHandler, ToolCallHandler)
+  { prompts           :: Maybe (PromptListHandler, PromptGetHandler)
+  , resources         :: Maybe (ResourceListHandler, ResourceReadHandler)
+  , resourceTemplates :: Maybe ResourceTemplateListHandler
+      -- ^ Parameterized resources (@resources\/templates\/list@). Template
+      --   URIs are read through the 'ResourceReadHandler' in 'resources' —
+      --   configure both, or template reads have nothing to serve them
+      --   (a templates-only configuration still answers @resources\/list@
+      --   with an empty list so the advertised capability stays honest).
+  , tools             :: Maybe (ToolListHandler, ToolCallHandler)
+  , completions       :: Maybe CompletionHandler
+      -- ^ Argument autocompletion (@completion\/complete@) for prompts and
+      --   resource templates.
+  }
+
+-- | Handlers for a server that supports nothing — record-update the features
+-- you provide, so adding new handler slots to the library does not break
+-- your construction.
+noHandlers :: McpServerHandlers
+noHandlers = McpServerHandlers
+  { prompts = Nothing
+  , resources = Nothing
+  , resourceTemplates = Nothing
+  , tools = Nothing
+  , completions = Nothing
   }

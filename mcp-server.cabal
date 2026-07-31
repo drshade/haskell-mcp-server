@@ -136,6 +136,7 @@ executable complete-example
   -- Other library packages from which modules are imported.
   build-depends:
     base,
+    containers,
     mcp-server,
     text,
 
@@ -180,6 +181,7 @@ test-suite haskell-mcp-server-test
     Spec.ModernEra
     Spec.ProtocolVersionNegotiation
     Spec.SchemaValidation
+    Spec.TemplatesCompletions
     Spec.ToolCallParsing
     Spec.TypedArgs
     Spec.UnicodeHandling

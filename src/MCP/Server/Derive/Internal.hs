@@ -31,6 +31,9 @@ module MCP.Server.Derive.Internal
   , optionalTextArg
   , requiredField
   , optionalField
+    -- * Resource template matching
+  , matchTemplateSegments
+  , templateField
   ) where
 
 import           Data.Aeson           (Value (..), encode)
@@ -45,6 +48,7 @@ import           Data.Scientific      (base10Exponent, floatingOrInteger,
 import           Data.Text            (Text)
 import qualified Data.Text            as T
 import qualified Data.Text.Encoding   as TE
+import           Network.URI          (unEscapeString)
 import           Text.Read            (readMaybe)
 
 import           MCP.Server.Types     (Error (..))
@@ -184,3 +188,28 @@ optionalField name p o = case KM.lookup (Key.fromText name) o of
   Nothing   -> Right Nothing
   Just Null -> Right Nothing
   Just v    -> either (Left . (("field '" <> name <> "': ") <>)) (Right . Just) (p v)
+
+-- ---------------------------------------------------------------------------
+-- Resource template matching
+-- ---------------------------------------------------------------------------
+
+-- | Match a URI against a template of the form @\<prefix\>{a}\/{b}\/…@: the
+-- rendered URI must start with the prefix and continue with exactly @n@
+-- non-empty, slash-separated segments, which are returned percent-decoded.
+-- Any query or fragment on the URI is ignored — templates declare only path
+-- variables (a literal @?@ or @#@ inside a segment value arrives
+-- percent-encoded and is unaffected).
+matchTemplateSegments :: Text -> Int -> String -> Maybe [Text]
+matchTemplateSegments prefix n uriStr = do
+  let base = T.takeWhile (\c -> c /= '?' && c /= '#') (T.pack uriStr)
+  rest <- T.stripPrefix prefix base
+  let segs = T.splitOn "/" rest
+  if length segs == n && all (not . T.null) segs
+    then Just (map (T.pack . unEscapeString . T.unpack) segs)
+    else Nothing
+
+-- | Decode one matched template segment into a field value.
+templateField :: Text -> (Text -> Either Text a) -> [Text] -> Int -> Either Error a
+templateField name p segs i = case drop i segs of
+  (s:_) -> either (Left . InvalidParams . (("template field '" <> name <> "': ") <>)) Right (p s)
+  []    -> Left $ InvalidParams $ "missing segment for template field '" <> name <> "'"

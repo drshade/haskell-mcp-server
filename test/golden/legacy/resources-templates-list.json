@@ -1,0 +1,1 @@
+{"id":11,"jsonrpc":"2.0","result":{"resourceTemplates":[{"description":"An item","mimeType":"text/plain","name":"item","uriTemplate":"resource://item/{itemId}"}]}}

@@ -164,6 +164,21 @@ handleTypedTool _ (QueryData (Filters ts mc)) =
 handleTypedTool _ (AlwaysFails msg) =
     pure $ toolError msg
 
+-- Resource type mixing static resources and templates (record constructors)
+data TemplResource
+    = Catalog
+    | MemberProfile { memberId :: Text }
+    | OrderItem { orderId :: Int, itemName :: Text }
+    deriving (Show, Eq)
+
+handleTemplResource :: ClientContext -> URI -> TemplResource -> IO ResourceContent
+handleTemplResource _ uri Catalog =
+    pure $ ResourceText uri "text/plain" "The catalog"
+handleTemplResource _ uri (MemberProfile uid) =
+    pure $ ResourceText uri "text/plain" ("Profile of " <> uid)
+handleTemplResource _ uri (OrderItem oid item) =
+    pure $ ResourceText uri "text/plain" ("Order " <> T.pack (show oid) <> " item " <> item)
+
 -- A prompt whose handler produces a multi-message conversation
 data ConvPrompt = Conversation { topic :: Text }
     deriving (Show, Eq)

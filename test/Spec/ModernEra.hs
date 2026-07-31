@@ -28,10 +28,8 @@ testServerInfo = McpServerInfo
 -- A server that only provides tools; the call handler reports the protocol
 -- version it saw in the ClientContext.
 testHandlers :: McpServerHandlers
-testHandlers = McpServerHandlers
-  { prompts = Nothing
-  , resources = Nothing
-  , tools = Just
+testHandlers = noHandlers
+  { tools = Just
       ( \_ctx -> pure []
       , \ctx _name _args -> pure $ Right $ toToolResult
           ("version=" <> maybe "none" id (clientProtocolVersion ctx))

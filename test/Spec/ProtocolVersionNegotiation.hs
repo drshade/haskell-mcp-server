@@ -10,7 +10,7 @@ import Test.Hspec
 import MCP.Server.Handlers (handleInitialize)
 import MCP.Server.JsonRpc (JsonRpcRequest(..), RequestId(..), JsonRpcResponse(..), JsonRpcError(..))
 import MCP.Server.Protocol (protocolVersion)
-import MCP.Server.Types (Error(..), McpServerHandlers(..), McpServerInfo(..))
+import MCP.Server.Types (Error(..), McpServerHandlers(..), McpServerInfo(..), noHandlers)
 
 -- | Test that server performs proper version negotiation according to MCP spec.
 --
@@ -33,10 +33,8 @@ spec = describe "Protocol Version Negotiation" $ do
 
   -- A server that only provides tools: capabilities in the initialize
   -- response should reflect exactly this.
-  let testHandlers = McpServerHandlers
-        { prompts = Nothing
-        , resources = Nothing
-        , tools = Just ( \_ctx -> pure []
+  let testHandlers = noHandlers
+        { tools = Just ( \_ctx -> pure []
                        , \_ctx name _args -> pure (Left (UnknownTool name))
                        )
         }

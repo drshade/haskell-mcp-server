@@ -25,7 +25,6 @@ import Control.Monad (forM_)
 import Data.Aeson
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map as Map
-import Data.Text (Text)
 import qualified Data.Text as T
 import MCP.Server
 import MCP.Server.Handlers (handleMcpMessage)
@@ -44,7 +43,7 @@ goldenServerInfo = McpServerInfo
 -- Deterministic manual handlers (no Template Haskell): one prompt, one
 -- resource, one happy tool, one failing tool.
 goldenHandlers :: McpServerHandlers
-goldenHandlers = McpServerHandlers
+goldenHandlers = noHandlers
   { prompts = Just (promptList, promptGet)
   , resources = Just (resourceList, resourceRead)
   , tools = Just (toolList, toolCall)
@@ -78,6 +77,20 @@ goldenHandlers = McpServerHandlers
       "boom" -> pure $ Right $ toolError "kaboom"
       _      -> pure $ Left $ UnknownTool name
 
+-- | 'goldenHandlers' extended with the handler slots introduced after
+-- v0.2.0. Used only for the fixtures of methods that postdate the legacy
+-- anchor: extending the main handler set would change the advertised
+-- capabilities and perturb the v0.2.0-anchored initialize fixture.
+extendedHandlers :: McpServerHandlers
+extendedHandlers = goldenHandlers
+  { resourceTemplates = Just $ \_ -> pure
+      [ ResourceTemplateDefinition "resource://item/{itemId}" "item"
+          (Just "An item") (Just "text/plain") Nothing
+      ]
+  , completions = Just $ \_ _ref _arg partial _ctx -> pure $ Right $
+      completionResult (filter (T.isPrefixOf partial) ["alpha", "beta"])
+  }
+
 -- | (fixture path, raw request). The raw requests are written out verbatim
 -- so the fixtures capture the full request->response wire behavior.
 cases :: [(FilePath, BSL.ByteString)]
@@ -105,30 +118,45 @@ cases =
   , ("modern/initialize",          "{\"jsonrpc\":\"2.0\",\"id\":27,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2026-07-28\",\"capabilities\":{},\"clientInfo\":{\"name\":\"golden-client\",\"version\":\"1.0\"}," <> meta <> "}}")
   , ("modern/ping",                "{\"jsonrpc\":\"2.0\",\"id\":28,\"method\":\"ping\",\"params\":{" <> meta <> "}}")
   ]
-  where
-    meta = "\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientInfo\":{\"name\":\"golden-client\",\"version\":\"1.0\"},\"io.modelcontextprotocol/clientCapabilities\":{}}"
 
-runCase :: BSL.ByteString -> IO Value
-runCase raw = do
+-- Methods introduced after v0.2.0: their fixtures originate on the branch
+-- that added the method (there is no earlier behavior to anchor to).
+extendedCases :: [(FilePath, BSL.ByteString)]
+extendedCases =
+  [ ("legacy/resources-templates-list", "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"resources/templates/list\"}")
+  , ("legacy/completion-complete",      "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"completion/complete\",\"params\":{\"ref\":{\"type\":\"ref/prompt\",\"name\":\"greet\"},\"argument\":{\"name\":\"name\",\"value\":\"al\"}}}")
+  , ("modern/resources-templates-list", "{\"jsonrpc\":\"2.0\",\"id\":29,\"method\":\"resources/templates/list\",\"params\":{" <> meta <> "}}")
+  , ("modern/completion-complete",      "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"completion/complete\",\"params\":{\"ref\":{\"type\":\"ref/prompt\",\"name\":\"greet\"},\"argument\":{\"name\":\"name\",\"value\":\"al\"}," <> meta <> "}}")
+  ]
+
+meta :: BSL.ByteString
+meta = "\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientInfo\":{\"name\":\"golden-client\",\"version\":\"1.0\"},\"io.modelcontextprotocol/clientCapabilities\":{}}"
+
+runCase :: McpServerHandlers -> BSL.ByteString -> IO Value
+runCase handlers raw = do
   jsonValue <- either (fail . ("request does not parse: " ++)) pure (eitherDecode raw)
   message <- either (fail . ("request is not JSON-RPC: " ++)) pure (parseJsonRpcMessage jsonValue)
-  maybeResponse <- handleMcpMessage goldenServerInfo defaultCacheHints goldenHandlers anonymousContext message
+  maybeResponse <- handleMcpMessage goldenServerInfo defaultCacheHints handlers anonymousContext message
   case maybeResponse of
     Just responseMsg -> pure $ encodeJsonRpcMessage responseMsg
     Nothing          -> fail "expected a response"
 
+goldenCase :: McpServerHandlers -> (FilePath, BSL.ByteString) -> Spec
+goldenCase handlers (name, raw) =
+  it name $ do
+    actual <- runCase handlers raw
+    let path = "test/golden/" ++ name ++ ".json"
+    exists <- doesFileExist path
+    accept <- lookupEnv "GOLDEN_ACCEPT"
+    if not exists && accept /= Nothing
+      then BSL.writeFile path (encode actual)
+      else do
+        fixtureBytes <- BSL.readFile path
+        case eitherDecode fixtureBytes :: Either String Value of
+          Left err      -> expectationFailure $ "fixture does not parse: " ++ err
+          Right fixture -> actual `shouldBe` fixture
+
 spec :: Spec
-spec = describe "Golden wire-format fixtures" $
-  forM_ cases $ \(name, raw) ->
-    it name $ do
-      actual <- runCase raw
-      let path = "test/golden/" ++ name ++ ".json"
-      exists <- doesFileExist path
-      accept <- lookupEnv "GOLDEN_ACCEPT"
-      if not exists && accept /= Nothing
-        then BSL.writeFile path (encode actual)
-        else do
-          fixtureBytes <- BSL.readFile path
-          case eitherDecode fixtureBytes :: Either String Value of
-            Left err      -> expectationFailure $ "fixture does not parse: " ++ err
-            Right fixture -> actual `shouldBe` fixture
+spec = describe "Golden wire-format fixtures" $ do
+  forM_ cases (goldenCase goldenHandlers)
+  forM_ extendedCases (goldenCase extendedHandlers)

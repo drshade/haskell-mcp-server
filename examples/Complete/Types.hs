@@ -15,6 +15,9 @@ data MyResource
     = ProductCategories
     | SaleItems
     | HeadlineBannerAd
+    -- A record constructor becomes a resource template:
+    -- resource://product_detail/{productSku}
+    | ProductDetail { productSku :: Text }
     deriving (Show, Eq)
 
 -- An enumeration argument: all-nullary data types become string enums in

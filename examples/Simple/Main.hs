@@ -36,8 +36,6 @@ main = do
             , serverVersion = "1.0.0"
             , serverInstructions = "A simple key-value store with GetValue and SetValue tools"
             }
-        McpServerHandlers
-            { prompts = Nothing     -- No prompts in this example
-            , resources = Nothing   -- No resources in this example
-            , tools = Just tools    -- Only tools in this example
+        noHandlers
+            { tools = Just tools    -- Only tools in this example
             }

@@ -14,8 +14,10 @@ module MCP.Server.Handlers
   , handlePromptsGet
   , handleResourcesList
   , handleResourcesRead
+  , handleResourcesTemplatesList
   , handleToolsList
   , handleToolsCall
+  , handleCompletionComplete
 
     -- * Protocol Support
   , validateProtocolVersion
@@ -112,6 +114,7 @@ cacheableMethods =
   , "prompts/list"
   , "resources/list"
   , "resources/read"
+  , "resources/templates/list"
   ]
 
 -- | Stamp the modern-revision result envelope onto a successful response:
@@ -188,8 +191,10 @@ handleMcpMessage serverInfo hints handlers ctx0 (JsonRpcMessageRequest req) = do
         "prompts/get" -> handlePromptsGet handlers ctx req
         "resources/list" -> handleResourcesList handlers ctx req
         "resources/read" -> handleResourcesRead handlers ctx req
+        "resources/templates/list" -> handleResourcesTemplatesList handlers ctx req
         "tools/list" -> handleToolsList handlers ctx req
         "tools/call" -> handleToolsCall handlers ctx req
+        "completion/complete" -> handleCompletionComplete handlers ctx req
         method -> return $ makeErrorResponse (requestId req) $ JsonRpcError
           { errorCode = -32601
           , errorMessage = "Method not found: " <> method
@@ -251,8 +256,12 @@ handleInitialize serverInfo handlers req = do
 handlerCapabilities :: McpServerHandlers -> ServerCapabilities
 handlerCapabilities handlers = ServerCapabilities
   { capabilityPrompts   = PromptCapabilities { promptListChanged = Nothing } <$ prompts handlers
-  , capabilityResources = ResourceCapabilities { resourceSubscribe = Nothing, resourceListChanged = Nothing } <$ resources handlers
+  , capabilityResources =
+      if isJust (resources handlers) || isJust (resourceTemplates handlers)
+        then Just ResourceCapabilities { resourceSubscribe = Nothing, resourceListChanged = Nothing }
+        else Nothing
   , capabilityTools     = ToolCapabilities { toolListChanged = Nothing } <$ tools handlers
+  , capabilityCompletions = CompletionCapabilities <$ completions handlers
   , capabilityLogging   = Nothing  -- Not supported yet
   }
 
@@ -337,6 +346,12 @@ handlePromptsGet handlers ctx req =
 handleResourcesList :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
 handleResourcesList handlers ctx req =
   case resources handlers of
+    -- A templates-only configuration advertises the resources capability,
+    -- so resources/list must answer (with an empty list) rather than error:
+    -- strict clients drop servers whose advertised capabilities error.
+    Nothing | isJust (resourceTemplates handlers) ->
+      return $ makeSuccessResponse (requestId req)
+        (toJSON (ResourcesListResponse { resourcesListResources = [] }))
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
       { errorCode = -32601
       , errorMessage = "Resources not supported"
@@ -385,6 +400,60 @@ handleResourcesRead handlers ctx req =
                         { resourcesReadContents = [resourceContent]
                         }
                   return $ makeSuccessResponse (requestId req) (toJSON response)
+
+-- | Handle resources/templates/list request
+handleResourcesTemplatesList :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
+handleResourcesTemplatesList handlers ctx req =
+  case resourceTemplates handlers of
+    Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
+      { errorCode = -32601
+      , errorMessage = "Resource templates not supported"
+      , errorData = Nothing
+      }
+    Just listHandler -> do
+      templates <- listHandler ctx
+      let response = ResourcesTemplatesListResponse
+            { resourcesTemplatesList = templates
+            }
+      return $ makeSuccessResponse (requestId req) (toJSON response)
+
+-- | Handle completion/complete request
+handleCompletionComplete :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
+handleCompletionComplete handlers ctx req =
+  case completions handlers of
+    Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
+      { errorCode = -32601
+      , errorMessage = "Completions not supported"
+      , errorData = Nothing
+      }
+    Just completeHandler ->
+      case requestParams req of
+        Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
+          { errorCode = -32602
+          , errorMessage = "Missing parameters"
+          , errorData = Nothing
+          }
+        Just params ->
+          case fromJSON params of
+            Error err -> return $ makeErrorResponse (requestId req) $ JsonRpcError
+              { errorCode = -32602
+              , errorMessage = "Invalid parameters: " <> T.pack err
+              , errorData = Nothing
+              }
+            Success completeReq -> do
+              result <- completeHandler ctx
+                (completeRef completeReq)
+                (completeArgumentName completeReq)
+                (completeArgumentValue completeReq)
+                (completeContextArgs completeReq)
+              case result of
+                Left err -> return $ makeErrorResponse (requestId req) $ JsonRpcError
+                  { errorCode = errorCodeFromMcpError err
+                  , errorMessage = errorMessageFromMcpError err
+                  , errorData = Nothing
+                  }
+                Right completion ->
+                  return $ makeSuccessResponse (requestId req) (toJSON (CompleteResponse completion))
 
 -- | Handle tools/list request
 handleToolsList :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse

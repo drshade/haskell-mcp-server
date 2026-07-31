@@ -22,6 +22,11 @@ module MCP.Server.Protocol
   , ResourcesListResponse(..)
   , ResourcesReadRequest(..)
   , ResourcesReadResponse(..)
+  , ResourcesTemplatesListResponse(..)
+
+    -- * Completion Protocol
+  , CompleteRequest(..)
+  , CompleteResponse(..)
 
     -- * Tools Protocol
   , ToolsListRequest(..)
@@ -40,8 +45,10 @@ module MCP.Server.Protocol
   ) where
 
 import           Data.Aeson
+import           Data.Aeson.Types (Parser)
 import           Data.Map         (Map)
 import           Data.Text        (Text)
+import qualified Data.Text        as T
 import           GHC.Generics     (Generic)
 import           MCP.Server.Types
 
@@ -213,6 +220,58 @@ data ResourcesReadResponse = ResourcesReadResponse
 instance ToJSON ResourcesReadResponse where
   toJSON resp = object
     [ "contents" .= resourcesReadContents resp
+    ]
+
+-- | Resource templates list response
+data ResourcesTemplatesListResponse = ResourcesTemplatesListResponse
+  { resourcesTemplatesList :: [ResourceTemplateDefinition]
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON ResourcesTemplatesListResponse where
+  toJSON resp = object
+    [ "resourceTemplates" .= resourcesTemplatesList resp
+    ]
+
+-- | Completion request (completion/complete)
+data CompleteRequest = CompleteRequest
+  { completeRef             :: CompletionRef
+  , completeArgumentName    :: Text
+  , completeArgumentValue   :: Text
+  , completeContextArgs     :: Map Text Text
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON CompleteRequest where
+  parseJSON = withObject "CompleteRequest" $ \o -> do
+    refObj <- o .: "ref"
+    ref <- withObject "CompletionRef"
+      (\r -> do
+        refType <- r .: "type" :: Parser Text
+        case refType of
+          "ref/prompt"   -> CompletionRefPrompt <$> r .: "name"
+          "ref/resource" -> CompletionRefResource <$> r .: "uri"
+          _              -> fail $ "Unknown completion ref type: " ++ T.unpack refType)
+      refObj
+    argument <- o .: "argument"
+    (name, value) <- withObject "argument"
+      (\a -> (,) <$> a .: "name" <*> a .: "value")
+      argument
+    ctx <- o .:? "context"
+    ctxArgs <- case ctx of
+      Nothing -> pure mempty
+      Just c  -> withObject "context" (\co -> co .:? "arguments" .!= mempty) c
+    pure $ CompleteRequest ref name value ctxArgs
+
+-- | Completion response
+data CompleteResponse = CompleteResponse
+  { completeResult :: CompletionResult
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON CompleteResponse where
+  toJSON (CompleteResponse res) = object
+    [ "completion" .= object
+        ([ "values" .= take 100 (completionValues res) ]
+          ++ maybe [] (\t -> ["total" .= t]) (completionTotal res)
+          ++ maybe [] (\h -> ["hasMore" .= h]) (completionHasMore res))
     ]
 
 -- | Tools list request
