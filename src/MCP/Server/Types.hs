@@ -643,7 +643,10 @@ data McpServerHandlers = McpServerHandlers
   , resources         :: Maybe (ResourceListHandler, ResourceReadHandler)
   , resourceTemplates :: Maybe ResourceTemplateListHandler
       -- ^ Parameterized resources (@resources\/templates\/list@). Template
-      --   URIs are read through the same 'ResourceReadHandler'.
+      --   URIs are read through the 'ResourceReadHandler' in 'resources' —
+      --   configure both, or template reads have nothing to serve them
+      --   (a templates-only configuration still answers @resources\/list@
+      --   with an empty list so the advertised capability stays honest).
   , tools             :: Maybe (ToolListHandler, ToolCallHandler)
   , completions       :: Maybe CompletionHandler
       -- ^ Argument autocompletion (@completion\/complete@) for prompts and

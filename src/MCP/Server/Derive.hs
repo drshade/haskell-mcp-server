@@ -461,6 +461,8 @@ templateURI name fields =
     <> concat ["/{" <> nameBase fn <> "}" | (fn, _, _) <- fields]
 
 mkTemplateDefWithDescription :: [(String, String)] -> Con -> Q Exp
+mkTemplateDefWithDescription _ (RecC name []) =
+  fail $ "Resource template constructors need at least one field: " ++ nameBase name
 mkTemplateDefWithDescription descriptions (RecC name fields) = do
   let description = descriptionFor descriptions (nameBase name) (nameBase name)
   [| ResourceTemplateDefinition
@@ -500,6 +502,8 @@ mkResourceAlt handlerName con restQ = case con of
     [| if show $(varE uriName) == $(litE $ stringL resourceURI)
          then Right <$> $(varE handlerName) $(varE ctxName) $(varE uriName) $(conE name)
          else $restQ |]
+  RecC name [] ->
+    fail $ "Resource template constructors need at least one field: " ++ nameBase name
   RecC name fields -> do
     let prefix = "resource://" <> snakeName name <> "/"
         segsName = mkName "segs"

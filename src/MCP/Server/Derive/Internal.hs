@@ -196,9 +196,13 @@ optionalField name p o = case KM.lookup (Key.fromText name) o of
 -- | Match a URI against a template of the form @\<prefix\>{a}\/{b}\/…@: the
 -- rendered URI must start with the prefix and continue with exactly @n@
 -- non-empty, slash-separated segments, which are returned percent-decoded.
+-- Any query or fragment on the URI is ignored — templates declare only path
+-- variables (a literal @?@ or @#@ inside a segment value arrives
+-- percent-encoded and is unaffected).
 matchTemplateSegments :: Text -> Int -> String -> Maybe [Text]
 matchTemplateSegments prefix n uriStr = do
-  rest <- T.stripPrefix prefix (T.pack uriStr)
+  let base = T.takeWhile (\c -> c /= '?' && c /= '#') (T.pack uriStr)
+  rest <- T.stripPrefix prefix base
   let segs = T.splitOn "/" rest
   if length segs == n && all (not . T.null) segs
     then Just (map (T.pack . unEscapeString . T.unpack) segs)

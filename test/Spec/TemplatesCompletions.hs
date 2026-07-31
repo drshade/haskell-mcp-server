@@ -93,6 +93,12 @@ spec = describe "Resource templates and completions" $ do
       result <- readUri "resource://member_profile/alice%20smith"
       result `expectText` "Profile of alice smith"
 
+    it "ignores query strings and fragments when matching templates" $ do
+      result <- readUri "resource://member_profile/alice?x=1"
+      result `expectText` "Profile of alice"
+      result2 <- readUri "resource://member_profile/alice#frag"
+      result2 `expectText` "Profile of alice"
+
     it "reads a multi-parameter template with typed segments" $ do
       result <- readUri "resource://order_item/42/widget"
       result `expectText` "Order 42 item widget"
@@ -124,6 +130,11 @@ spec = describe "Resource templates and completions" $ do
         Just (JsonRpcMessageResponse r) ->
           fmap errorCode (responseError r) `shouldBe` Just (-32601)
         other -> expectationFailure $ "Expected a response, got: " ++ show other
+
+    it "answers resources/list with an empty list for a templates-only server" $ do
+      let handlers = noHandlers { resourceTemplates = Just templTemplates }
+      o <- resultOf =<< runReq handlers "resources/list" Nothing
+      KM.lookup "resources" o `shouldBe` Just (toJSON ([] :: [ResourceDefinition]))
 
   describe "completion/complete" $ do
     it "dispatches prompt refs with context arguments" $ do

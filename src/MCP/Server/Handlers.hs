@@ -346,6 +346,12 @@ handlePromptsGet handlers ctx req =
 handleResourcesList :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
 handleResourcesList handlers ctx req =
   case resources handlers of
+    -- A templates-only configuration advertises the resources capability,
+    -- so resources/list must answer (with an empty list) rather than error:
+    -- strict clients drop servers whose advertised capabilities error.
+    Nothing | isJust (resourceTemplates handlers) ->
+      return $ makeSuccessResponse (requestId req)
+        (toJSON (ResourcesListResponse { resourcesListResources = [] }))
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
       { errorCode = -32601
       , errorMessage = "Resources not supported"
