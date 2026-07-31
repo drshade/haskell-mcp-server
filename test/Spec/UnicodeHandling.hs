@@ -219,7 +219,7 @@ spec = describe "Unicode Handling" $ do
             _ -> return $ Left $ UnknownTool name
 
       -- Handlers above ignore the per-request client context
-      let ctx = ClientContext Nothing Nothing
+      let ctx = anonymousContext
       let handlers = McpServerHandlers
             { prompts = Just (const promptListHandler, const promptGetHandler)
             , resources = Just (const resourceListHandler, const resourceReadHandler)

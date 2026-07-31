@@ -9,6 +9,7 @@ module MCP.Server.Handlers
     -- * Individual Request Handlers
   , handleInitialize
   , handlePing
+  , handleServerDiscover
   , handlePromptsList
   , handlePromptsGet
   , handleResourcesList
@@ -19,6 +20,8 @@ module MCP.Server.Handlers
     -- * Protocol Support
   , validateProtocolVersion
   , getMessageSummary
+  , metaProtocolVersion
+  , unsupportedVersionError
 
     -- * Error Conversion
   , errorCodeFromMcpError
@@ -26,8 +29,10 @@ module MCP.Server.Handlers
   ) where
 
 import           Data.Aeson
+import qualified Data.Aeson.Key         as Key
+import qualified Data.Aeson.KeyMap      as KM
 import qualified Data.Map               as Map
-import           Data.Maybe             (fromMaybe)
+import           Data.Maybe             (fromMaybe, isJust)
 import           Data.Text              (Text)
 import qualified Data.Text              as T
 import           System.IO              (hPutStrLn, stderr)
@@ -62,35 +67,140 @@ getMessageSummary (JsonRpcMessageResponse resp) =
 -- Per MCP spec: "If the server supports the requested protocol version,
 -- it MUST respond with the same version. Otherwise, the server MUST respond
 -- with another protocol version it supports."
+--
+-- Only /legacy/ revisions are eligible here: a client that negotiates via
+-- @initialize@ is legacy by definition, so proposing @2026-07-28@ (or
+-- anything unknown) negotiates down to the newest legacy revision rather
+-- than promising stateless semantics inside a handshake.
 validateProtocolVersion :: Text -> Either Text Text
 validateProtocolVersion clientVersion
   | clientVersion `elem` supportedVersions = Right clientVersion  -- Supported: echo the client's own version
   | otherwise = Right protocolVersion  -- Unknown: negotiate down to the server's default version
 
--- | Handle an MCP message and return a response if needed
+-- | Look up an @io.modelcontextprotocol/\<key\>@ entry in a request's
+-- params @_meta@ object.
+metaLookup :: Text -> Maybe Value -> Maybe Value
+metaLookup key params = do
+  Object o <- params
+  Object m <- KM.lookup "_meta" o
+  KM.lookup (Key.fromText ("io.modelcontextprotocol/" <> key)) m
+
+-- | The protocol revision a request declares in its params @_meta@
+-- (modern, 2026-07-28+ clients). 'Nothing' for legacy requests.
+metaProtocolVersion :: Maybe Value -> Maybe Text
+metaProtocolVersion params = case metaLookup "protocolVersion" params of
+  Just (String v) -> Just v
+  _               -> Nothing
+
+-- | The @UnsupportedProtocolVersionError@ (-32022) for a declared version
+-- this library does not implement, listing what it does.
+unsupportedVersionError :: Text -> JsonRpcError
+unsupportedVersionError requested = JsonRpcError
+  { errorCode = -32022
+  , errorMessage = "Unsupported protocol version"
+  , errorData = Just $ object
+      [ "supported" .= allVersions
+      , "requested" .= requested
+      ]
+  }
+
+-- | Methods whose modern results carry the required cacheability fields.
+cacheableMethods :: [Text]
+cacheableMethods =
+  [ "server/discover"
+  , "tools/list"
+  , "prompts/list"
+  , "resources/list"
+  , "resources/read"
+  ]
+
+-- | Stamp the modern-revision result envelope onto a successful response:
+-- @resultType: \"complete\"@, the server's identity in result @_meta@, and
+-- (for cacheable methods) @ttlMs@ and @cacheScope@. Error responses and
+-- legacy responses pass through untouched.
+decorateModern :: McpServerInfo -> CacheHints -> Text -> JsonRpcResponse -> JsonRpcResponse
+decorateModern serverInfo hints method resp = case responseResult resp of
+  Just (Object o) -> resp { responseResult = Just $ Object $ decorate o }
+  _               -> resp
+  where
+    decorate = insertCache . KM.insert "resultType" (String "complete") . insertMeta
+    insertMeta o = KM.insert "_meta" (Object meta) o
+      where meta = case KM.lookup "_meta" o of
+              Just (Object m) -> KM.insert serverInfoKey serverInfoVal m
+              _               -> KM.singleton serverInfoKey serverInfoVal
+    serverInfoKey = "io.modelcontextprotocol/serverInfo"
+    serverInfoVal = object
+      [ "name" .= serverName serverInfo
+      , "version" .= serverVersion serverInfo
+      ]
+    insertCache o
+      | method `elem` cacheableMethods =
+          KM.insert "ttlMs" (toJSON (cacheTtlMs hints)) $
+          KM.insert "cacheScope"
+            (String (if cacheScopePublic hints then "public" else "private")) o
+      | otherwise = o
+
+-- | Handle an MCP message and return a response if needed.
+--
+-- The server is dual-era: a request that declares a protocol revision in
+-- its params @_meta@ (2026-07-28+) is served statelessly with the modern
+-- result envelope; a request that does not is served exactly as before
+-- under the revision negotiated by @initialize@.
 handleMcpMessage :: McpServerInfo
+                 -> CacheHints
                  -> McpServerHandlers
                  -> ClientContext
                  -> JsonRpcMessage
                  -> IO (Maybe JsonRpcMessage)
-handleMcpMessage serverInfo handlers ctx (JsonRpcMessageRequest req) = do
-  response <- case requestMethod req of
-    "initialize" -> handleInitialize serverInfo handlers req
-    "ping" -> handlePing req
-    "prompts/list" -> handlePromptsList handlers ctx req
-    "prompts/get" -> handlePromptsGet handlers ctx req
-    "resources/list" -> handleResourcesList handlers ctx req
-    "resources/read" -> handleResourcesRead handlers ctx req
-    "tools/list" -> handleToolsList handlers ctx req
-    "tools/call" -> handleToolsCall handlers ctx req
-    method -> return $ makeErrorResponse (requestId req) $ JsonRpcError
-      { errorCode = -32601
-      , errorMessage = "Method not found: " <> method
-      , errorData = Nothing
-      }
-  return $ Just $ JsonRpcMessageResponse response
+handleMcpMessage serverInfo hints handlers ctx0 (JsonRpcMessageRequest req) = do
+  let params = requestParams req
+      declaredVersion = metaProtocolVersion params
+  case declaredVersion of
+    Just v | v `notElem` modernVersions ->
+      return $ Just $ JsonRpcMessageResponse $
+        makeErrorResponse (requestId req) (unsupportedVersionError v)
+    _ -> do
+      -- server/discover is itself a modern-revision method (and the
+      -- backwards-compatibility probe), so it always gets the modern
+      -- envelope even if a probing client omitted _meta.
+      let modern = isJust declaredVersion || requestMethod req == "server/discover"
+          ctx = ctx0
+            { clientProtocolVersion = declaredVersion
+            , clientInfo = metaLookup "clientInfo" params
+            , clientCapabilities = metaLookup "clientCapabilities" params
+            }
+      response <- case requestMethod req of
+        -- Era purity: the modern revision has neither initialize (nothing to
+        -- negotiate statelessly) nor ping (removed) — a request declaring a
+        -- modern revision must be served "according to this revision", so
+        -- these are unknown methods there.
+        m | isJust declaredVersion, m `elem` ["initialize", "ping"] ->
+              return $ makeErrorResponse (requestId req) $ JsonRpcError
+                { errorCode = -32601
+                , errorMessage = "Method not found: " <> m
+                    <> " (not part of protocol revision " <> fromMaybe "" declaredVersion <> ")"
+                , errorData = Nothing
+                }
+        "initialize" -> handleInitialize serverInfo handlers req
+        "ping" -> handlePing req
+        "server/discover" -> handleServerDiscover serverInfo handlers req
+        "prompts/list" -> handlePromptsList handlers ctx req
+        "prompts/get" -> handlePromptsGet handlers ctx req
+        "resources/list" -> handleResourcesList handlers ctx req
+        "resources/read" -> handleResourcesRead handlers ctx req
+        "tools/list" -> handleToolsList handlers ctx req
+        "tools/call" -> handleToolsCall handlers ctx req
+        method -> return $ makeErrorResponse (requestId req) $ JsonRpcError
+          { errorCode = -32601
+          , errorMessage = "Method not found: " <> method
+          , errorData = Nothing
+          }
+      let response' = if modern
+            then decorateModern serverInfo hints (requestMethod req) response
+            else response
+      return $ Just $ JsonRpcMessageResponse response'
 
-handleMcpMessage _ _ _ (JsonRpcMessageNotification notif) = do
+handleMcpMessage _ _ _ _ (JsonRpcMessageNotification notif) = do
   case notificationMethod notif of
     "notifications/initialized" ->
       hPutStrLn stderr "Received initialized notification - server is ready for operation"
@@ -98,7 +208,7 @@ handleMcpMessage _ _ _ (JsonRpcMessageNotification notif) = do
       hPutStrLn stderr $ "Received unknown notification: " ++ T.unpack (notificationMethod notif)
   return Nothing
 
-handleMcpMessage _ _ _ (JsonRpcMessageResponse _) =
+handleMcpMessage _ _ _ _ (JsonRpcMessageResponse _) =
   return Nothing
 
 -- | Handle initialize request
@@ -128,25 +238,42 @@ handleInitialize serverInfo handlers req = do
               }
             Right negotiatedVersion -> do
               hPutStrLn stderr $ "Client version: " ++ T.unpack clientVersion ++ ", using: " ++ T.unpack negotiatedVersion
-              -- Only advertise a capability that actually has a handler.
-              -- Advertising e.g. "prompts" while prompts/list returns an error
-              -- makes strict clients (e.g. Crush) drop the whole server.
-              let capabilities = ServerCapabilities
-                    { capabilityPrompts   = PromptCapabilities { promptListChanged = Nothing } <$ prompts handlers
-                    , capabilityResources = ResourceCapabilities { resourceSubscribe = Nothing, resourceListChanged = Nothing } <$ resources handlers
-                    , capabilityTools     = ToolCapabilities { toolListChanged = Nothing } <$ tools handlers
-                    , capabilityLogging   = Nothing  -- Not supported yet
-                    }
               let response = InitializeResponse
                     { initRespProtocolVersion = negotiatedVersion
-                    , initRespCapabilities = capabilities
+                    , initRespCapabilities = handlerCapabilities handlers
                     , initRespServerInfo = serverInfo
                     }
               return $ makeSuccessResponse (requestId req) (toJSON response)
 
+-- | Only advertise a capability that actually has a handler.
+-- Advertising e.g. "prompts" while prompts/list returns an error
+-- makes strict clients (e.g. Crush) drop the whole server.
+handlerCapabilities :: McpServerHandlers -> ServerCapabilities
+handlerCapabilities handlers = ServerCapabilities
+  { capabilityPrompts   = PromptCapabilities { promptListChanged = Nothing } <$ prompts handlers
+  , capabilityResources = ResourceCapabilities { resourceSubscribe = Nothing, resourceListChanged = Nothing } <$ resources handlers
+  , capabilityTools     = ToolCapabilities { toolListChanged = Nothing } <$ tools handlers
+  , capabilityLogging   = Nothing  -- Not supported yet
+  }
+
 -- | Handle ping request
 handlePing :: JsonRpcRequest -> IO JsonRpcResponse
 handlePing req = return $ makeSuccessResponse (requestId req) (toJSON PongResponse)
+
+-- | Handle server/discover (2026-07-28+): the server's supported protocol
+-- revisions, capabilities and identity, available before any other request.
+-- Also serves as the stdio backwards-compatibility probe. The modern result
+-- envelope (resultType, serverInfo _meta, cacheability) is stamped on by
+-- 'decorateModern'.
+handleServerDiscover :: McpServerInfo -> McpServerHandlers -> JsonRpcRequest -> IO JsonRpcResponse
+handleServerDiscover serverInfo handlers req = do
+  let result = object $
+        [ "supportedVersions" .= allVersions
+        , "capabilities" .= handlerCapabilities handlers
+        ] ++ (if T.null (serverInstructions serverInfo)
+                then []
+                else ["instructions" .= serverInstructions serverInfo])
+  return $ makeSuccessResponse (requestId req) result
 
 -- | Handle prompts/list request
 handlePromptsList :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse

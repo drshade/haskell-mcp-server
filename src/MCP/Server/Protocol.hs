@@ -35,6 +35,8 @@ module MCP.Server.Protocol
     -- * Protocol Functions
   , protocolVersion
   , supportedVersions
+  , modernVersions
+  , allVersions
   ) where
 
 import           Data.Aeson
@@ -43,12 +45,15 @@ import           Data.Text        (Text)
 import           GHC.Generics     (Generic)
 import           MCP.Server.Types
 
--- | The protocol revision the server advertises by default. Used as the
--- fallback when a client proposes a version this library does not recognise.
+-- | The newest /legacy/ (initialize-handshake) revision the server
+-- advertises by default. Used as the fallback when an initializing client
+-- proposes a version this library does not recognise — deliberately capped
+-- at the newest legacy revision: a client that sends @initialize@ is legacy
+-- by definition and must not be promised the stateless 2026-07-28 semantics.
 protocolVersion :: Text
 protocolVersion = "2025-11-25"
 
--- | Date-versioned MCP revisions whose wire format for the basic
+-- | Legacy (initialize-handshake) revisions whose wire format for the basic
 -- tool/resource/prompt operations this library implements is identical.
 -- The server echoes back any of these a client proposes (see
 -- 'MCP.Server.Handlers.validateProtocolVersion'), satisfying the spec
@@ -62,6 +67,20 @@ supportedVersions =
   , "2025-03-26"
   , "2024-11-05"
   ]
+
+-- | Modern (stateless, per-request @_meta@) revisions this library
+-- implements. Requests declaring one of these are served with modern
+-- semantics: @resultType@, cacheability fields, and @serverInfo@ in result
+-- @_meta@.
+modernVersions :: [Text]
+modernVersions =
+  [ "2026-07-28"
+  ]
+
+-- | Every revision this library implements, newest first — what
+-- @server\/discover@ and 'UnsupportedProtocolVersionError' report.
+allVersions :: [Text]
+allVersions = modernVersions ++ supportedVersions
 
 
 -- | Initialize request

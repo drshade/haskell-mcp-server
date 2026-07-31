@@ -1,0 +1,1 @@
+{"id":8,"jsonrpc":"2.0","result":{"description":"A greeting","messages":[{"content":{"text":"Hello, World!","type":"text"},"role":"user"}]}}

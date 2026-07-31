@@ -1,0 +1,1 @@
+{"id":3,"jsonrpc":"2.0","result":{"tools":[{"description":"Echo the text","inputSchema":{"properties":{"text":{"description":"The text","type":"string"}},"required":["text"],"type":"object"},"name":"echo"}]}}

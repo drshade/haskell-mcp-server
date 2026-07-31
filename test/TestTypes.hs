@@ -4,7 +4,7 @@ module TestTypes where
 
 import           Data.Text  (Text)
 import qualified Data.Text  as T
-import           MCP.Server (ClientContext (..), Content (..), MessageRole (..),
+import           MCP.Server (ClientContext, anonymousContext, Content (..), MessageRole (..),
                              PromptMessage (..), PromptResult (..),
                              ResourceContent (..), ToolResult, toolError,
                              toolResult)
@@ -12,7 +12,7 @@ import           Network.URI (URI)
 
 -- Context passed to handlers in tests (no transport-level identity)
 anonCtx :: ClientContext
-anonCtx = ClientContext Nothing Nothing
+anonCtx = anonymousContext
 
 -- Test data types for end-to-end testing
 data TestPrompt
