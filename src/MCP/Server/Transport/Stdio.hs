@@ -103,9 +103,12 @@ transportRunStdioWithConfig config serverInfo handlers = do
   let
     -- Open a subscriptions/listen stream: acknowledge, then deliver
     -- matching events tagged with the subscription id until cancelled.
+    -- A listen reusing an already-open subscription id replaces the old
+    -- stream (otherwise the shadowed writer would leak until EOF).
     openSubscription src req = do
       let subId = requestId req
           notifFilter = parseNotificationFilter (requestParams req)
+      _ <- cancelSubscription subId
       chan <- atomically $ subscribeEvents src
       sendNotification $ acknowledgedNotification subId notifFilter
       tid <- forkIO $ forever $ do
@@ -130,7 +133,7 @@ transportRunStdioWithConfig config serverInfo handlers = do
       subs <- readMVar subsVar
       mapM_ (\(subId, tid) -> do
                 killThread tid
-                sendResponse $ closureResponse subId)
+                sendResponse $ closureResponse serverInfo subId)
             subs
 
     handleParsed message = case message of
@@ -155,12 +158,16 @@ transportRunStdioWithConfig config serverInfo handlers = do
             logLine $ "Ignoring cancellation for unknown request " <> T.pack (show cancelledId)
 
       _ -> do
-        response <- handleMcpMessage serverInfo (stdioCacheHints config) notifSupport handlers anonymousContext message
-        -- Legacy pushes start once the handshake that advertised them is done
+        -- The client's initialized notification is the legacy ready signal:
+        -- the lifecycle forbids server notifications before it arrives, and
+        -- it only arrives after the client accepted a successful handshake
+        -- response (so failed initializes never enable pushes).
         case message of
-          JsonRpcMessageRequest req
-            | requestMethod req == "initialize" -> writeIORef legacyReady True
+          JsonRpcMessageNotification n
+            | notificationMethod n == "notifications/initialized" ->
+                writeIORef legacyReady True
           _ -> pure ()
+        response <- handleMcpMessage serverInfo (stdioCacheHints config) notifSupport handlers anonymousContext message
         case response of
           Just responseMsg -> do
             logLine $ "Sending response for: " <> T.pack (show (getMessageSummary message))

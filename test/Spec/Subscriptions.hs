@@ -93,11 +93,15 @@ spec = describe "Change notifications" $ do
       notificationMethod n `shouldBe` "notifications/tools/list_changed"
       notificationParams n `shouldBe` Nothing
 
-    it "closure responses carry resultType and the subscription id" $ do
-      let r = closureResponse subId
+    it "closure responses carry resultType, the subscription id and the server identity" $ do
+      let r = closureResponse (McpServerInfo "S" "2.0" "") subId
       responseResult r `shouldBe` Just (object
         [ "resultType" .= ("complete" :: Text)
-        , "_meta" .= object ["io.modelcontextprotocol/subscriptionId" .= (7 :: Int)]
+        , "_meta" .= object
+            [ "io.modelcontextprotocol/subscriptionId" .= (7 :: Int)
+            , "io.modelcontextprotocol/serverInfo" .= object
+                [ "name" .= ("S" :: Text), "version" .= ("2.0" :: Text) ]
+            ]
         ])
 
   describe "Notifier plumbing" $ do

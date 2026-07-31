@@ -49,6 +49,7 @@ import qualified Data.Text              as T
 import           Network.URI            (URI)
 
 import           MCP.Server.JsonRpc
+import           MCP.Server.Types       (McpServerInfo (..))
 
 -- | A change an application can announce.
 data ChangeEvent
@@ -172,9 +173,16 @@ legacyEventNotification event =
   in makeNotification method $ if null extra then Nothing else Just (object extra)
 
 -- | The graceful-closure response a server sends when it ends a
--- subscription on its own initiative (e.g. shutdown).
-closureResponse :: RequestId -> JsonRpcResponse
-closureResponse subId = makeSuccessResponse subId $ object
+-- subscription on its own initiative (e.g. shutdown). Like every modern
+-- result it carries the server identity alongside the subscription id.
+closureResponse :: McpServerInfo -> RequestId -> JsonRpcResponse
+closureResponse serverInfo subId = makeSuccessResponse subId $ object
   [ "resultType" .= ("complete" :: Text)
-  , subscriptionMeta subId
+  , "_meta" .= object
+      [ "io.modelcontextprotocol/subscriptionId" .= subId
+      , "io.modelcontextprotocol/serverInfo" .= object
+          [ "name" .= serverName serverInfo
+          , "version" .= serverVersion serverInfo
+          ]
+      ]
   ]
