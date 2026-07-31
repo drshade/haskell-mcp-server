@@ -1,0 +1,1 @@
+{"id":7,"jsonrpc":"2.0","result":{"prompts":[{"arguments":[{"description":"Who to greet","name":"name","required":true}],"description":"Greet someone","name":"greet"}]}}

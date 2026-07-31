@@ -170,6 +170,17 @@ handleMcpMessage serverInfo hints handlers ctx0 (JsonRpcMessageRequest req) = do
             , clientCapabilities = metaLookup "clientCapabilities" params
             }
       response <- case requestMethod req of
+        -- Era purity: the modern revision has neither initialize (nothing to
+        -- negotiate statelessly) nor ping (removed) — a request declaring a
+        -- modern revision must be served "according to this revision", so
+        -- these are unknown methods there.
+        m | isJust declaredVersion, m `elem` ["initialize", "ping"] ->
+              return $ makeErrorResponse (requestId req) $ JsonRpcError
+                { errorCode = -32601
+                , errorMessage = "Method not found: " <> m
+                    <> " (not part of protocol revision " <> fromMaybe "" declaredVersion <> ")"
+                , errorData = Nothing
+                }
         "initialize" -> handleInitialize serverInfo handlers req
         "ping" -> handlePing req
         "server/discover" -> handleServerDiscover serverInfo handlers req

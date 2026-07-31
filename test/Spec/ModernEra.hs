@@ -121,6 +121,16 @@ spec = describe "Dual-era protocol support" $ do
       KM.lookup "content" o `shouldBe`
         Just (toJSON [object ["type" .= ("text" :: Text), "text" .= ("version=2026-07-28" :: Text)]])
 
+    it "serves initialize and ping as unknown methods when a modern revision is declared" $ do
+      e1 <- errorOf =<< run (request "initialize" (Just (modernParams
+        [ "protocolVersion" .= ("2026-07-28" :: Text)
+        , "capabilities" .= object []
+        , "clientInfo" .= object ["name" .= ("c" :: Text), "version" .= ("1" :: Text)]
+        ])))
+      errorCode e1 `shouldBe` (-32601)
+      e2 <- errorOf =<< run (request "ping" (Just (modernParams [])))
+      errorCode e2 `shouldBe` (-32601)
+
     it "rejects undeclared revisions with UnsupportedProtocolVersionError" $ do
       e <- errorOf =<< run (request "tools/list" (Just (object
         [ "_meta" .= object ["io.modelcontextprotocol/protocolVersion" .= ("2099-01-01" :: Text)] ])))

@@ -52,7 +52,9 @@ tested-with: GHC == 9.6.7
               || == 9.14.1
 
 -- Extra source files to be distributed with the package, such as examples, or a tutorial module.
--- extra-source-files: SPEC.md
+extra-source-files:
+  test/golden/legacy/*.json
+  test/golden/modern/*.json
 -- Source repository information
 source-repository head
   type: git
@@ -173,6 +175,7 @@ test-suite haskell-mcp-server-test
   other-modules:
     Spec.AdvancedDerivation
     Spec.BasicDerivation
+    Spec.GoldenWire
     Spec.JSONConversion
     Spec.ModernEra
     Spec.ProtocolVersionNegotiation
@@ -199,6 +202,7 @@ test-suite haskell-mcp-server-test
     base,
     bytestring,
     containers,
+    directory,
     hspec,
     mcp-server,
     network-uri,
