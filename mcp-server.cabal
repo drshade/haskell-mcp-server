@@ -49,6 +49,7 @@ tested-with: GHC == 9.6.7
               || == 9.8.4
               || == 9.10.3
               || == 9.12.2
+              || == 9.14.1
 
 -- Extra source files to be distributed with the package, such as examples, or a tutorial module.
 -- extra-source-files: SPEC.md
