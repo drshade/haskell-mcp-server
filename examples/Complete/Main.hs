@@ -3,6 +3,7 @@
 
 module Main where
 
+import qualified Data.Text as T
 import           MCP.Server
 import           MCP.Server.Derive
 import           System.IO (hSetEncoding, stderr, stdout, utf8)
@@ -24,17 +25,29 @@ handleResource _ uri SaleItems =
 handleResource _ uri HeadlineBannerAd =
     pure $ ResourceText uri "text/plain" "🛒 Weekly Special: 20% off all organic produce! 🥕🥬🍎"
 
-handleTool :: ClientContext -> MyTool -> IO Content
+-- Tool handlers return a full ToolResult: execution failures are reported
+-- with isError so the model can see them (returning plain Content works too
+-- for simple tools — see the other examples).
+handleTool :: ClientContext -> MyTool -> IO ToolResult
 handleTool _ (SearchForProduct q category) =
     case category of
-        Nothing -> pure $ ContentText $ "Search results for '" <> q <> "': Found 15 products across all categories"
-        Just cat -> pure $ ContentText $ "Search results for '" <> q <> "' in " <> cat <> ": Found 8 products"
-handleTool _ (AddToCart sku) = pure $ ContentText $ "Added item " <> sku <> " to your cart. Cart total: 3 items"
-handleTool _ Checkout = pure $ ContentText "Checkout completed! Order #12345 confirmed. Thank you for shopping with us!"
+        Nothing -> pure $ toolResult [ContentText $ "Search results for '" <> q <> "': Found 15 products across all categories"]
+        Just cat -> pure $ toolResult [ContentText $ "Search results for '" <> q <> "' in " <> cat <> ": Found 8 products"]
+handleTool _ (AddToCart sku quantities)
+    | any (<= 0) quantities = pure $ toolError "Quantities must be positive"
+    | otherwise = pure $ toolResult
+        [ContentText $ "Added " <> T.pack (show (sum quantities)) <> " of item " <> sku <> " to your cart"]
+handleTool _ (Checkout speed (Address street city zipCode)) =
+    pure $ toolResult
+        [ ContentText $ "Checkout completed! Order #12345 will ship "
+            <> T.pack (show speed) <> " to " <> street <> ", " <> city
+            <> maybe "" (" " <>) zipCode
+        ]
 handleTool _ (ComplexTool field1 field2 field3 field4 field5) =
-    pure $ ContentText $ "Complex tool called with: " <> field1 <> ", " <> field2 <>
+    pure $ toolResult
+        [ContentText $ "Complex tool called with: " <> field1 <> ", " <> field2 <>
                         maybe "" (", " <>) field3 <> ", " <> field4 <>
-                        maybe "" (", " <>) field5
+                        maybe "" (", " <>) field5]
 
 main :: IO ()
 main = do

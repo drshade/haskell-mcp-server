@@ -10,6 +10,7 @@ import qualified Spec.AdvancedDerivation
 import qualified Spec.UnicodeHandling
 import qualified Spec.ProtocolVersionNegotiation
 import qualified Spec.ToolCallParsing
+import qualified Spec.TypedArgs
 
 main :: IO ()
 main = hspec $ do
@@ -21,3 +22,4 @@ main = hspec $ do
     Spec.UnicodeHandling.spec
     Spec.ProtocolVersionNegotiation.spec
     Spec.ToolCallParsing.spec
+    Spec.TypedArgs.spec

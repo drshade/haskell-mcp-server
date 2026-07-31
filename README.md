@@ -82,18 +82,50 @@ data MyTool = GetValue | SetValue | SearchItems
 -- Becomes: "get_value", "set_value", "search_items"
 ```
 
-#### Automatic Type Conversion
+#### Typed Tool Arguments
 
-The derivation system automatically converts Text arguments to appropriate Haskell types:
+Tool arguments are decoded from full JSON values, and the generated
+`inputSchema` mirrors the field types:
 
 ```haskell
-data MyTool = Calculate { number :: Int, factor :: Double, enabled :: Bool }
--- Text "42" -> Int 42
--- Text "3.14" -> Double 3.14
--- Text "true" -> Bool True
+data Color = Red | Green | Blue          -- all-nullary type: string enum
+data Filters = Filters                   -- record: nested JSON object
+  { tags     :: [Text]                   -- list: JSON array
+  , maxCount :: Maybe Int                -- Maybe: optional field
+  }
+
+data MyTool = Search
+  { query   :: Text
+  , color   :: Color                     -- "red" | "green" | "blue"
+  , filters :: Filters                   -- { "tags": [...], "maxCount": ... }
+  , limit   :: Maybe Int
+  }
 ```
 
-Supported conversions: `Int`, `Integer`, `Double`, `Float`, `Bool`, and `Text` (no conversion).
+Primitive fields (`Int`, `Integer`, `Double`, `Float`, `Bool`, `Text`) are
+parsed leniently: the native JSON type and its string representation are
+both accepted (`42` or `"42"`), since many clients send numbers and
+booleans as strings.
+
+Prompt arguments are string-valued per the MCP specification, so prompt
+records are limited to primitive and enumeration fields.
+
+#### Tool Results
+
+Simple handlers can return plain `Content` (or `Text`). Return a full
+`ToolResult` for multiple content blocks, structured content, or to report
+execution failures with `isError` — which the spec prefers over protocol
+errors, so the model can see what went wrong and react:
+
+```haskell
+handleTool :: ClientContext -> MyTool -> IO ToolResult
+handleTool _ (Search q _ _ _)
+  | T.null q  = pure $ toolError "query must not be empty"
+  | otherwise = pure $ toolResult [ContentText ("Results for " <> q)]
+```
+
+Prompt handlers can likewise return a `PromptResult` with a description and
+a multi-message conversation (user and assistant roles).
 
 #### Nested Parameter Types
 
@@ -165,9 +197,10 @@ For fine-grained control, implement handlers manually:
 import MCP.Server
 
 -- Manual handler implementation. Every handler receives the per-request
--- 'ClientContext' as its first argument.
+-- 'ClientContext' as its first argument. Prompt arguments are string-valued
+-- (Map Text Text); tool arguments are full JSON values (Map Text Value).
 promptListHandler :: ClientContext -> IO [PromptDefinition]
-promptGetHandler :: ClientContext -> PromptName -> [(ArgumentName, ArgumentValue)] -> IO (Either Error Content)
+promptGetHandler :: ClientContext -> PromptName -> Map Text Text -> IO (Either Error PromptResult)
 -- ... implement your custom logic
 
 main :: IO ()
@@ -200,6 +233,10 @@ main = runMcpServerHttpWithConfig customConfig serverInfo handlers
       , httpEndpoint = "/api/mcp"
       , httpVerbose = True     -- Enable detailed logging
       , httpAuthorize = Nothing -- No authentication (see below)
+      , httpAllowedOrigins = Just ["https://app.example.com"]
+          -- Origin validation (DNS-rebinding protection): requests with an
+          -- Origin header outside this list are rejected with 403. Nothing
+          -- disables the check (only for servers unreachable from browsers).
       }
 ```
 
@@ -221,10 +258,11 @@ application; the library only threads the identity through:
 
 **Features:**
 - CORS enabled for web clients
-- GET `/mcp` for server discovery
-- POST `/mcp` for JSON-RPC messages
+- POST `/mcp` for JSON-RPC messages (GET returns 405 — this library does not
+  offer server-initiated SSE streams)
 - Protocol-version negotiation across supported revisions (`2024-11-05`–`2025-11-25`)
 - Optional pluggable bearer-token authentication via `httpAuthorize`
+- Origin validation via `httpAllowedOrigins`
 
 ## Examples
 

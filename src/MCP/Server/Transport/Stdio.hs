@@ -4,51 +4,91 @@
 module MCP.Server.Transport.Stdio
   ( -- * STDIO Transport
     transportRunStdio
+  , transportRunStdioWithConfig
+  , StdioConfig(..)
+  , defaultStdioConfig
   ) where
 
-import           Control.Monad          (when)
-import           Control.Monad.IO.Class (MonadIO, liftIO)
+import           Control.Monad          (unless, when)
 import           Data.Aeson
 import qualified Data.ByteString.Lazy   as BSL
 import qualified Data.Text              as T
 import qualified Data.Text.Encoding     as TE
 import qualified Data.Text.IO           as TIO
-import           System.IO              (hFlush, stderr, stdout)
+import           System.IO              (hFlush, hIsEOF, hSetEncoding, stderr,
+                                         stdin, stdout, utf8)
 
 import           MCP.Server.Handlers
 import           MCP.Server.JsonRpc
 import           MCP.Server.Types
 
+-- | STDIO transport configuration
+data StdioConfig = StdioConfig
+  { stdioVerbose :: Bool
+    -- ^ When 'True', raw request bodies are logged to stderr. The default
+    -- ('False') logs only message summaries (method and id): tool arguments
+    -- may carry sensitive data that does not belong in logs.
+  } deriving (Show, Eq)
 
--- | Transport-specific implementation for STDIO
-import           System.IO              (hSetEncoding, utf8)
+-- | Default STDIO configuration: summaries only, no raw bodies.
+defaultStdioConfig :: StdioConfig
+defaultStdioConfig = StdioConfig
+  { stdioVerbose = False
+  }
 
-transportRunStdio :: (MonadIO m) => McpServerInfo -> McpServerHandlers m -> m ()
-transportRunStdio serverInfo handlers = do
+-- | Run the STDIO transport with the default configuration.
+transportRunStdio :: McpServerInfo -> McpServerHandlers -> IO ()
+transportRunStdio = transportRunStdioWithConfig defaultStdioConfig
+
+-- | Run the STDIO transport with the given configuration.
+transportRunStdioWithConfig :: StdioConfig -> McpServerInfo -> McpServerHandlers -> IO ()
+transportRunStdioWithConfig config serverInfo handlers = do
   -- Ensure UTF-8 encoding for all handles
-  liftIO $ do
-    hSetEncoding stderr utf8
-    hSetEncoding stdout utf8
+  hSetEncoding stderr utf8
+  hSetEncoding stdout utf8
   loop
   where
+    logLine = TIO.hPutStrLn stderr
+    logVerbose msg = when (stdioVerbose config) $ logLine msg
+
     loop = do
-      input <- liftIO TIO.getLine
-      when (not $ T.null $ T.strip input) $ do
-        -- Use TIO.hPutStrLn for UTF-8 output
-        liftIO $ TIO.hPutStrLn stderr $ "Received request: " <> input
-        case eitherDecode (BSL.fromStrict $ TE.encodeUtf8 input) of
-          Left err -> liftIO $ TIO.hPutStrLn stderr $ "Parse error: " <> T.pack err
-          Right jsonValue -> do
-            case parseJsonRpcMessage jsonValue of
-              Left err -> liftIO $ TIO.hPutStrLn stderr $ "JSON-RPC parse error: " <> T.pack err
-              Right message -> do
-                liftIO $ TIO.hPutStrLn stderr $ "Processing message: " <> T.pack (show (getMessageSummary message))
-                response <- handleMcpMessage serverInfo handlers (ClientContext Nothing Nothing) message
-                case response of
-                  Just responseMsg -> do
-                    liftIO $ TIO.hPutStrLn stderr $ "Sending response for: " <> T.pack (show (getMessageSummary message))
-                    let responseText = TE.decodeUtf8 $ BSL.toStrict $ encode $ encodeJsonRpcMessage responseMsg
-                    liftIO $ TIO.putStrLn responseText
-                    liftIO $ hFlush stdout
-                  Nothing -> liftIO $ TIO.hPutStrLn stderr $ "No response needed for: " <> T.pack (show (getMessageSummary message))
-        loop
+      eof <- hIsEOF stdin
+      if eof
+        then logLine "stdin closed - shutting down"
+        else do
+          input <- TIO.getLine
+          unless (T.null $ T.strip input) $ do
+            logVerbose $ "Received request: " <> input
+            case eitherDecode (BSL.fromStrict $ TE.encodeUtf8 input) of
+              Left err -> do
+                logLine $ "Parse error: " <> T.pack err
+                sendResponse $ makeErrorResponse RequestIdNull $ JsonRpcError
+                  { errorCode = -32700
+                  , errorMessage = "Parse error"
+                  , errorData = Nothing
+                  }
+              Right jsonValue ->
+                case parseJsonRpcMessage jsonValue of
+                  Left err -> do
+                    logLine $ "JSON-RPC parse error: " <> T.pack err
+                    sendResponse $ makeErrorResponse RequestIdNull $ JsonRpcError
+                      { errorCode = -32600
+                      , errorMessage = "Invalid Request"
+                      , errorData = Nothing
+                      }
+                  Right message -> do
+                    logLine $ "Processing message: " <> T.pack (show (getMessageSummary message))
+                    response <- handleMcpMessage serverInfo handlers (ClientContext Nothing Nothing) message
+                    case response of
+                      Just responseMsg -> do
+                        logLine $ "Sending response for: " <> T.pack (show (getMessageSummary message))
+                        sendMessage responseMsg
+                      Nothing ->
+                        logLine $ "No response needed for: " <> T.pack (show (getMessageSummary message))
+          loop
+
+    sendMessage msg = sendRaw $ encode $ encodeJsonRpcMessage msg
+    sendResponse resp = sendRaw $ encode $ toJSON resp
+    sendRaw bytes = do
+      TIO.putStrLn $ TE.decodeUtf8 $ BSL.toStrict bytes
+      hFlush stdout

@@ -1,5 +1,66 @@
 # Revision history for mcp-server
 
+## 0.2.0.0 - ???
+
+A major overhaul of the handler API. The headline change: the handler
+boundary is no longer stringly typed.
+
+### Typed tool arguments and results (BREAKING)
+
+* Tool arguments arrive as full JSON values (`Map Text Value`). The Template
+  Haskell derivation decodes records recursively and now supports **list
+  fields**, **enumeration fields** (all-nullary data types, wired as string
+  enums), and **nested record fields** in addition to the primitives.
+  Primitive parsing is lenient: native JSON types or their string
+  representations are both accepted (many clients send numbers/booleans as
+  strings). Prompt arguments remain string-valued per the MCP specification.
+* `inputSchema` is generated as a real JSON Schema (`Schema`/`SchemaType`
+  ADT with `enum`, `items` and nested `object`s), replacing the flat
+  `InputSchemaDefinition*` types that silently typed every non-primitive
+  field as a string.
+* Tool handlers produce a `ToolResult`: multiple content blocks,
+  `structuredContent`, `_meta`, and `isError`. Tool *execution* failures
+  should be reported via `isError` (see `toolError`) so the model can see
+  them — per spec — instead of surfacing as JSON-RPC protocol errors.
+  The `ToToolResult` class keeps simple handlers simple: returning
+  `Content` or `Text` still works unchanged.
+* Prompt handlers produce a `PromptResult` (optional description plus a
+  multi-message conversation with user/assistant roles) via the analogous
+  `ToPromptResult` class.
+* `Content` gains `audio` and `resource_link` variants; embedded resources
+  now carry their full contents as the spec requires.
+* `ToolDefinition` gains `outputSchema`; `tools/call` responses carry
+  `structuredContent`.
+* Handler types are fixed to `IO` — the monad parameter was unusable
+  through the public API (both transports required `IO`).
+
+### Transport fixes
+
+* stdio: a blank line on stdin no longer terminates the server, EOF shuts
+  down cleanly instead of crashing, and malformed input is answered with
+  proper JSON-RPC error responses (`-32700`/`-32600`, `id: null`).
+* stdio: raw request bodies are no longer logged to stderr by default
+  (tool arguments may carry sensitive data) — only message summaries.
+  `runMcpServerStdioWithConfig` with `stdioVerbose = True` restores full
+  body logging.
+* JSON-RPC: messages are classified by shape (method/id presence) instead
+  of parse-fallthrough, so a request with a malformed `id` is answered
+  with an error rather than silently dropped as a notification. Request
+  ids must be integral.
+* HTTP: new `httpAllowedOrigins` policy on `HttpConfig` (Origin
+  validation / DNS-rebinding protection, a spec MUST); accepted
+  notifications return `202` with no body; malformed bodies get JSON-RPC
+  error responses; the `Access-Control-Allow-Origin` header is set
+  consistently on every response and echoes the validated origin (with
+  `Vary: Origin`) when a policy is configured.
+* HTTP (BREAKING): the non-spec GET "discovery" endpoint is removed — the
+  MCP endpoint now answers GET with `405 Method Not Allowed`, matching the
+  spec (no revision defines a GET discovery response, and `2026-07-28`
+  requires 405 here).
+* Integer tool arguments bound the scientific-notation exponent (1024, the
+  same bound aeson uses) so a tiny payload like `1e1000000000` cannot force
+  allocation of a gigabyte-sized `Integer`.
+
 ## 0.1.0.21 - ???
 
 * **BREAKING**: every handler (prompt/resource/tool; list and get/read/call)

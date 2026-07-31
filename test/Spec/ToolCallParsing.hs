@@ -3,27 +3,27 @@
 
 module Spec.ToolCallParsing (spec) where
 
+import Data.Aeson (Value (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import MCP.Server
 import MCP.Server.Derive
 import Test.Hspec
+import TestHelpers
 import TestTypes
 
-allTypesHandlers :: (ToolListHandler IO, ToolCallHandler IO)
+allTypesHandlers :: (ToolListHandler, ToolCallHandler)
 allTypesHandlers = $(deriveToolHandler ''AllTypesTool 'handleAllTypesTool)
 
-callTool :: Text -> [(Text, Text)] -> IO (Either Error Content)
-callTool = snd allTypesHandlers anonCtx
+callTool :: Text -> [(Text, Text)] -> IO (Either Error ToolResult)
+callTool name args = snd allTypesHandlers anonCtx name (stringArgs args)
 
-shouldBeRight :: IO (Either Error Content) -> Text -> IO ()
+shouldBeRight :: IO (Either Error ToolResult) -> Text -> IO ()
 shouldBeRight action expected = do
   result <- action
-  case result of
-    Right (ContentText content) -> content `shouldBe` expected
-    other -> expectationFailure $ "Expected ContentText '" ++ T.unpack expected ++ "' but got: " ++ show other
+  result `shouldBeTextResult` expected
 
-shouldBeInvalidParams :: IO (Either Error Content) -> Text -> IO ()
+shouldBeInvalidParams :: IO (Either Error ToolResult) -> Text -> IO ()
 shouldBeInvalidParams action expectedSubstring = do
   result <- action
   case result of
@@ -31,7 +31,7 @@ shouldBeInvalidParams action expectedSubstring = do
       T.isInfixOf expectedSubstring msg `shouldBe` True
     other -> expectationFailure $ "Expected InvalidParams containing '" ++ T.unpack expectedSubstring ++ "' but got: " ++ show other
 
-shouldBeMissingParams :: IO (Either Error Content) -> Text -> IO ()
+shouldBeMissingParams :: IO (Either Error ToolResult) -> Text -> IO ()
 shouldBeMissingParams action expectedSubstring = do
   result <- action
   case result of
@@ -146,3 +146,14 @@ spec = describe "Tool call parsing" $ do
       shouldBeMissingParams
         (callTool "required_fields" [("rfText", "hello")])
         "is missing"
+
+  describe "Integer exponent bound" $ do
+    -- Regression: aeson keeps huge exponents compact, so without a bound a
+    -- ~13-byte payload like 1e100000 would materialize a 100001-digit Integer.
+    it "rejects huge exponents without materializing the Integer" $ do
+      result <- snd allTypesHandlers anonCtx "optional_fields"
+        (valueArgs [("ofInteger", Number (read "1e100000"))])
+      case result of
+        Left (InvalidParams msg) ->
+          msg `shouldSatisfy` T.isInfixOf "exponent too large"
+        other -> expectationFailure $ "Expected InvalidParams but got: " ++ show other

@@ -20,9 +20,10 @@ module MCP.Server.JsonRpc
 
 import Data.Text (Text)
 import Data.Aeson
+import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (parseEither)
+import Data.Scientific (toBoundedInteger)
 import GHC.Generics (Generic)
-import Control.Applicative ((<|>))
 
 -- | JSON-RPC request ID
 data RequestId
@@ -38,7 +39,9 @@ instance ToJSON RequestId where
 
 instance FromJSON RequestId where
   parseJSON (String t) = return $ RequestIdText t
-  parseJSON (Number n) = return $ RequestIdNumber (round n)
+  parseJSON (Number n) = case toBoundedInteger n of
+    Just i  -> return $ RequestIdNumber i
+    Nothing -> fail "Request id must be an integral number"
   parseJSON Null = return RequestIdNull
   parseJSON _ = fail "Invalid request ID"
 
@@ -137,12 +140,16 @@ instance ToJSON JsonRpcMessage where
   toJSON (JsonRpcMessageResponse resp) = toJSON resp
   toJSON (JsonRpcMessageNotification notif) = toJSON notif
 
+-- | Classify by shape instead of parse-fallthrough: a request with a
+-- malformed field must fail as a request, not silently succeed as a
+-- notification (which has fewer required fields).
 instance FromJSON JsonRpcMessage where
-  parseJSON v = parseRequest v <|> parseResponse v <|> parseNotification v
-    where
-      parseRequest = fmap JsonRpcMessageRequest . parseJSON
-      parseResponse = fmap JsonRpcMessageResponse . parseJSON
-      parseNotification = fmap JsonRpcMessageNotification . parseJSON
+  parseJSON = withObject "JsonRpcMessage" $ \o ->
+    case (KM.member "method" o, KM.member "id" o) of
+      (True, True)   -> JsonRpcMessageRequest <$> parseJSON (Object o)
+      (True, False)  -> JsonRpcMessageNotification <$> parseJSON (Object o)
+      (False, True)  -> JsonRpcMessageResponse <$> parseJSON (Object o)
+      (False, False) -> fail "Not a JSON-RPC message: no method and no id"
 
 -- | Create a successful JSON-RPC response
 makeSuccessResponse :: RequestId -> Value -> JsonRpcResponse
