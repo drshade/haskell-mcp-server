@@ -73,7 +73,7 @@ logVerbose config msg = when (httpVerbose config) $ hPutStrLn stderr msg
 
 
 -- | Transport-specific implementation for HTTP
-transportRunHttp :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> IO ()
+transportRunHttp :: HttpConfig -> McpServerInfo -> McpServerHandlers -> IO ()
 transportRunHttp config serverInfo handlers = do
   let settings = Warp.setHost (fromString $ httpHost config) $
                  Warp.setPort (httpPort config) $
@@ -83,7 +83,7 @@ transportRunHttp config serverInfo handlers = do
   Warp.runSettings settings (mcpApplication config serverInfo handlers)
 
 -- | WAI Application for MCP over HTTP
-mcpApplication :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> Wai.Application
+mcpApplication :: HttpConfig -> McpServerInfo -> McpServerHandlers -> Wai.Application
 mcpApplication config serverInfo handlers req respond0 = do
   -- Log the request
   logVerbose config $ "HTTP " ++ show (Wai.requestMethod req) ++ " " ++ T.unpack (TE.decodeUtf8 $ Wai.rawPathInfo req)
@@ -152,7 +152,7 @@ bearerToken req = do
     else Nothing
 
 -- | Handle MCP requests according to Streamable HTTP specification
-handleMcpRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> ClientContext -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleMcpRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 handleMcpRequest config serverInfo handlers ctx req respond = do
   -- Read the POST body up front so we can identify the `initialize` request:
   -- it negotiates the protocol version in its *body*, so (per the Streamable
@@ -226,7 +226,7 @@ extractMethod body = case decode body of
   _ -> Nothing
 
 -- | Handle JSON-RPC request from HTTP body
-handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> ClientContext -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 handleJsonRpcRequest config serverInfo handlers ctx body respond = do
   case eitherDecode body of
     Left err -> do
@@ -243,7 +243,7 @@ handleJsonRpcRequest config serverInfo handlers ctx body respond = do
     Right jsonValue -> handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond
 
 -- | Handle a single JSON-RPC message
-handleSingleJsonRpc :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> ClientContext -> Value -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleSingleJsonRpc :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Value -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 handleSingleJsonRpc config serverInfo handlers ctx jsonValue respond = do
   case parseJsonRpcMessage jsonValue of
     Left err -> do

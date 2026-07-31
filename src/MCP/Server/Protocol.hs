@@ -116,26 +116,6 @@ data PongResponse = PongResponse
 instance ToJSON PongResponse where
   toJSON PongResponse = object []
 
--- | Message role for prompts
-data MessageRole = RoleUser | RoleAssistant
-  deriving (Show, Eq, Generic)
-
-instance ToJSON MessageRole where
-  toJSON RoleUser      = "user"
-  toJSON RoleAssistant = "assistant"
-
--- | Prompt message
-data PromptMessage = PromptMessage
-  { promptMessageRole    :: MessageRole
-  , promptMessageContent :: Content
-  } deriving (Show, Eq, Generic)
-
-instance ToJSON PromptMessage where
-  toJSON msg = object
-    [ "role" .= promptMessageRole msg
-    , "content" .= promptMessageContent msg
-    ]
-
 -- | Prompts list request
 data PromptsListRequest = PromptsListRequest
   deriving (Show, Eq, Generic)
@@ -246,15 +226,17 @@ instance FromJSON ToolsCallRequest where
 
 -- | Tools call response (2025-06-18 enhanced)
 data ToolsCallResponse = ToolsCallResponse
-  { toolsCallContent :: [Content]
-  , toolsCallIsError :: Maybe Bool
-  , toolsCallMeta :: Maybe Value  -- New _meta field for structured output
+  { toolsCallContent           :: [Content]
+  , toolsCallIsError           :: Maybe Bool
+  , toolsCallStructuredContent :: Maybe Value  -- ^ structuredContent (2025-06-18+)
+  , toolsCallMeta              :: Maybe Value
   } deriving (Show, Eq, Generic)
 
 instance ToJSON ToolsCallResponse where
   toJSON resp = object $
     [ "content" .= toolsCallContent resp
     ] ++ maybe [] (\e -> ["isError" .= e]) (toolsCallIsError resp)
+      ++ maybe [] (\s -> ["structuredContent" .= s]) (toolsCallStructuredContent resp)
       ++ maybe [] (\m -> ["_meta" .= m]) (toolsCallMeta resp)
 
 -- | List changed notification

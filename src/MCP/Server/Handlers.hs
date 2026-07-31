@@ -25,9 +25,9 @@ module MCP.Server.Handlers
   , errorMessageFromMcpError
   ) where
 
-import           Control.Monad.IO.Class (MonadIO, liftIO)
 import           Data.Aeson
 import qualified Data.Map               as Map
+import           Data.Maybe             (fromMaybe)
 import           Data.Text              (Text)
 import qualified Data.Text              as T
 import           System.IO              (hPutStrLn, stderr)
@@ -68,12 +68,11 @@ validateProtocolVersion clientVersion
   | otherwise = Right protocolVersion  -- Unknown: negotiate down to the server's default version
 
 -- | Handle an MCP message and return a response if needed
-handleMcpMessage :: (MonadIO m)
-                 => McpServerInfo
-                 -> McpServerHandlers m
+handleMcpMessage :: McpServerInfo
+                 -> McpServerHandlers
                  -> ClientContext
                  -> JsonRpcMessage
-                 -> m (Maybe JsonRpcMessage)
+                 -> IO (Maybe JsonRpcMessage)
 handleMcpMessage serverInfo handlers ctx (JsonRpcMessageRequest req) = do
   response <- case requestMethod req of
     "initialize" -> handleInitialize serverInfo handlers req
@@ -93,19 +92,17 @@ handleMcpMessage serverInfo handlers ctx (JsonRpcMessageRequest req) = do
 
 handleMcpMessage _ _ _ (JsonRpcMessageNotification notif) = do
   case notificationMethod notif of
-    "notifications/initialized" -> do
-      liftIO $ hPutStrLn stderr "Received initialized notification - server is ready for operation"
-      return ()
-    _ -> do
-      liftIO $ hPutStrLn stderr $ "Received unknown notification: " ++ T.unpack (notificationMethod notif)
-      return ()
+    "notifications/initialized" ->
+      hPutStrLn stderr "Received initialized notification - server is ready for operation"
+    _ ->
+      hPutStrLn stderr $ "Received unknown notification: " ++ T.unpack (notificationMethod notif)
   return Nothing
 
 handleMcpMessage _ _ _ (JsonRpcMessageResponse _) =
   return Nothing
 
 -- | Handle initialize request
-handleInitialize :: (MonadIO m) => McpServerInfo -> McpServerHandlers m -> JsonRpcRequest -> m JsonRpcResponse
+handleInitialize :: McpServerInfo -> McpServerHandlers -> JsonRpcRequest -> IO JsonRpcResponse
 handleInitialize serverInfo handlers req = do
   case requestParams req of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
@@ -130,7 +127,7 @@ handleInitialize serverInfo handlers req = do
               , errorData = Nothing
               }
             Right negotiatedVersion -> do
-              liftIO $ hPutStrLn stderr $ "Client version: " ++ T.unpack clientVersion ++ ", using: " ++ T.unpack negotiatedVersion
+              hPutStrLn stderr $ "Client version: " ++ T.unpack clientVersion ++ ", using: " ++ T.unpack negotiatedVersion
               -- Only advertise a capability that actually has a handler.
               -- Advertising e.g. "prompts" while prompts/list returns an error
               -- makes strict clients (e.g. Crush) drop the whole server.
@@ -148,11 +145,11 @@ handleInitialize serverInfo handlers req = do
               return $ makeSuccessResponse (requestId req) (toJSON response)
 
 -- | Handle ping request
-handlePing :: (MonadIO m) => JsonRpcRequest -> m JsonRpcResponse
+handlePing :: JsonRpcRequest -> IO JsonRpcResponse
 handlePing req = return $ makeSuccessResponse (requestId req) (toJSON PongResponse)
 
 -- | Handle prompts/list request
-handlePromptsList :: (MonadIO m) => McpServerHandlers m -> ClientContext -> JsonRpcRequest -> m JsonRpcResponse
+handlePromptsList :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
 handlePromptsList handlers ctx req =
   case prompts handlers of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
@@ -168,7 +165,7 @@ handlePromptsList handlers ctx req =
       return $ makeSuccessResponse (requestId req) (toJSON response)
 
 -- | Handle prompts/get request
-handlePromptsGet :: (MonadIO m) => McpServerHandlers m -> ClientContext -> JsonRpcRequest -> m JsonRpcResponse
+handlePromptsGet :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
 handlePromptsGet handlers ctx req =
   case prompts handlers of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
@@ -191,7 +188,9 @@ handlePromptsGet handlers ctx req =
               , errorData = Nothing
               }
             Success getReq -> do
-              let args = maybe [] (map (\(k, v) -> (k, jsonValueToText v)) . Map.toList) (promptsGetArguments getReq)
+              -- Prompt arguments are string-valued per the MCP spec; flatten
+              -- any non-string values a lenient client may have sent.
+              let args = maybe Map.empty (fmap jsonValueToText) (promptsGetArguments getReq)
               result <- getHandler ctx (promptsGetName getReq) args
               case result of
                 Left err -> return $ makeErrorResponse (requestId req) $ JsonRpcError
@@ -199,16 +198,16 @@ handlePromptsGet handlers ctx req =
                   , errorMessage = errorMessageFromMcpError err
                   , errorData = Nothing
                   }
-                Right content -> do
+                Right promptRes -> do
                   let response = PromptsGetResponse
-                        { promptsGetDescription = Nothing
-                        , promptsGetMessages = [PromptMessage RoleUser content]
-                        , promptsGetMeta = Nothing  -- Can be extended for additional metadata
+                        { promptsGetDescription = promptResultDescription promptRes
+                        , promptsGetMessages = promptResultMessages promptRes
+                        , promptsGetMeta = Nothing
                         }
                   return $ makeSuccessResponse (requestId req) (toJSON response)
 
 -- | Handle resources/list request
-handleResourcesList :: (MonadIO m) => McpServerHandlers m -> ClientContext -> JsonRpcRequest -> m JsonRpcResponse
+handleResourcesList :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
 handleResourcesList handlers ctx req =
   case resources handlers of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
@@ -224,7 +223,7 @@ handleResourcesList handlers ctx req =
       return $ makeSuccessResponse (requestId req) (toJSON response)
 
 -- | Handle resources/read request
-handleResourcesRead :: (MonadIO m) => McpServerHandlers m -> ClientContext -> JsonRpcRequest -> m JsonRpcResponse
+handleResourcesRead :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
 handleResourcesRead handlers ctx req =
   case resources handlers of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
@@ -261,7 +260,7 @@ handleResourcesRead handlers ctx req =
                   return $ makeSuccessResponse (requestId req) (toJSON response)
 
 -- | Handle tools/list request
-handleToolsList :: (MonadIO m) => McpServerHandlers m -> ClientContext -> JsonRpcRequest -> m JsonRpcResponse
+handleToolsList :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
 handleToolsList handlers ctx req =
   case tools handlers of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
@@ -277,7 +276,7 @@ handleToolsList handlers ctx req =
       return $ makeSuccessResponse (requestId req) (toJSON response)
 
 -- | Handle tools/call request
-handleToolsCall :: (MonadIO m) => McpServerHandlers m -> ClientContext -> JsonRpcRequest -> m JsonRpcResponse
+handleToolsCall :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
 handleToolsCall handlers ctx req =
   case tools handlers of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
@@ -300,7 +299,8 @@ handleToolsCall handlers ctx req =
               , errorData = Nothing
               }
             Success callReq -> do
-              let args = maybe [] (map (\(k, v) -> (k, jsonValueToText v)) . Map.toList) (toolsCallArguments callReq)
+              -- Tool arguments are passed through as full JSON values.
+              let args = fromMaybe Map.empty (toolsCallArguments callReq)
               result <- callHandler ctx (toolsCallName callReq) args
               case result of
                 Left err -> return $ makeErrorResponse (requestId req) $ JsonRpcError
@@ -308,11 +308,12 @@ handleToolsCall handlers ctx req =
                   , errorMessage = errorMessageFromMcpError err
                   , errorData = Nothing
                   }
-                Right content -> do
+                Right toolRes -> do
                   let response = ToolsCallResponse
-                        { toolsCallContent = [content]
-                        , toolsCallIsError = Nothing
-                        , toolsCallMeta = Nothing  -- Can be extended for structured output
+                        { toolsCallContent = toolResultContent toolRes
+                        , toolsCallIsError = if toolResultIsError toolRes then Just True else Nothing
+                        , toolsCallStructuredContent = toolResultStructured toolRes
+                        , toolsCallMeta = toolResultMeta toolRes
                         }
                   return $ makeSuccessResponse (requestId req) (toJSON response)
 

@@ -5,23 +5,37 @@ module MCP.Server.Types
   ( -- * Content Types
     Content(..)
   , ContentImageData(..)
-  , ContentResourceData(..)
+  , ContentAudioData(..)
   , ResourceContent(..)
 
-    -- * URI Utilities  
+    -- * Handler Result Types
+  , ToolResult(..)
+  , toolResult
+  , toolError
+  , ToToolResult(..)
+  , PromptResult(..)
+  , ToPromptResult(..)
+  , PromptMessage(..)
+  , MessageRole(..)
+
+    -- * URI Utilities
   , parseURI
   , URI
 
     -- * Error Types
   , Error(..)
 
+    -- * Schema Types
+  , Schema(..)
+  , SchemaType(..)
+  , schema
+  , describedSchema
+
     -- * Definition Types
   , PromptDefinition(..)
   , ResourceDefinition(..)
   , ToolDefinition(..)
   , ArgumentDefinition(..)
-  , InputSchemaDefinition(..)
-  , InputSchemaDefinitionProperty(..)
 
     -- * Server Types
   , McpServerInfo(..)
@@ -33,7 +47,7 @@ module MCP.Server.Types
   , ToolCapabilities(..)
   , LoggingCapabilities(..)
 
-    -- * Request/Response Types
+    -- * Handler Types
   , PromptListHandler
   , PromptGetHandler
   , ResourceListHandler
@@ -50,7 +64,9 @@ module MCP.Server.Types
 
 import           Data.Aeson
 import           Data.Aeson.Key   (fromText)
-import           Data.Aeson.Types (Parser)
+import qualified Data.Aeson.KeyMap as KM
+import           Data.Aeson.Types (Pair, Parser)
+import           Data.Map         (Map)
 import           Data.Maybe       (catMaybes)
 import           Data.Text        (Text)
 import qualified Data.Text        as T
@@ -66,7 +82,11 @@ type ArgumentValue = Text
 data Content
   = ContentText Text
   | ContentImage ContentImageData
-  | ContentResource ContentResourceData
+  | ContentAudio ContentAudioData
+  | ContentEmbeddedResource ResourceContent
+    -- ^ A resource embedded into the result, carrying its full contents
+  | ContentResourceLink ResourceDefinition
+    -- ^ A reference to a resource the client can read separately
   deriving (Show, Eq, Generic)
 
 instance ToJSON Content where
@@ -79,13 +99,19 @@ instance ToJSON Content where
     , "data" .= contentImageData img
     , "mimeType" .= contentImageMimeType img
     ]
-  toJSON (ContentResource res) = object
-    [ "type" .= ("resource" :: Text)
-    , "resource" .= object
-        [ "uri" .= contentResourceUri res
-        , "mimeType" .= contentResourceMimeType res
-        ]
+  toJSON (ContentAudio audio) = object
+    [ "type" .= ("audio" :: Text)
+    , "data" .= contentAudioData audio
+    , "mimeType" .= contentAudioMimeType audio
     ]
+  toJSON (ContentEmbeddedResource res) = object
+    [ "type" .= ("resource" :: Text)
+    , "resource" .= res
+    ]
+  toJSON (ContentResourceLink def) =
+    case toJSON def of
+      Object o -> Object (KM.insert "type" (String "resource_link") o)
+      other    -> other
 
 instance FromJSON Content where
   parseJSON = withObject "Content" $ \o -> do
@@ -96,21 +122,22 @@ instance FromJSON Content where
         imgData <- o .: "data"
         mimeType <- o .: "mimeType"
         return $ ContentImage $ ContentImageData imgData mimeType
-      "resource" -> do
-        res <- o .: "resource"
-        uri <- res .: "uri"
-        mimeType <- res .:? "mimeType"
-        return $ ContentResource $ ContentResourceData uri mimeType
+      "audio" -> do
+        audioData <- o .: "data"
+        mimeType <- o .: "mimeType"
+        return $ ContentAudio $ ContentAudioData audioData mimeType
+      "resource" -> ContentEmbeddedResource <$> o .: "resource"
+      "resource_link" -> ContentResourceLink <$> parseJSON (Object o)
       _ -> fail $ "Unknown content type: " ++ T.unpack contentType
 
 data ContentImageData = ContentImageData
-  { contentImageData     :: Text
+  { contentImageData     :: Text  -- ^ base64-encoded image data
   , contentImageMimeType :: Text
   } deriving (Show, Eq, Generic)
 
-data ContentResourceData = ContentResourceData
-  { contentResourceUri      :: URI
-  , contentResourceMimeType :: Maybe Text
+data ContentAudioData = ContentAudioData
+  { contentAudioData     :: Text  -- ^ base64-encoded audio data
+  , contentAudioMimeType :: Text
   } deriving (Show, Eq, Generic)
 
 -- | Resource content compliant with MCP specification
@@ -154,6 +181,104 @@ instance FromJSON ResourceContent where
           (Nothing, Just blob) -> return $ ResourceBlob uri mimeType blob
           _ -> fail "ResourceContent must have either 'text' or 'blob' field"
 
+-- | Message role for prompts
+data MessageRole = RoleUser | RoleAssistant
+  deriving (Show, Eq, Generic)
+
+instance ToJSON MessageRole where
+  toJSON RoleUser      = "user"
+  toJSON RoleAssistant = "assistant"
+
+-- | Prompt message
+data PromptMessage = PromptMessage
+  { promptMessageRole    :: MessageRole
+  , promptMessageContent :: Content
+  } deriving (Show, Eq, Generic)
+
+instance ToJSON PromptMessage where
+  toJSON msg = object
+    [ "role" .= promptMessageRole msg
+    , "content" .= promptMessageContent msg
+    ]
+
+-- | The full result of a tool call.
+--
+-- Tool /execution/ failures belong in the result with 'toolResultIsError'
+-- set (so the model can see what went wrong and react); JSON-RPC errors are
+-- reserved for protocol-level failures such as unknown tools or malformed
+-- arguments.
+data ToolResult = ToolResult
+  { toolResultContent    :: [Content]
+  , toolResultStructured :: Maybe Value  -- ^ structuredContent (2025-06-18+)
+  , toolResultIsError    :: Bool
+  , toolResultMeta       :: Maybe Value
+  } deriving (Show, Eq, Generic)
+
+-- | A successful tool result with the given content blocks.
+toolResult :: [Content] -> ToolResult
+toolResult content = ToolResult
+  { toolResultContent = content
+  , toolResultStructured = Nothing
+  , toolResultIsError = False
+  , toolResultMeta = Nothing
+  }
+
+-- | A failed tool execution: the message is reported to the model with
+-- @isError: true@ rather than as a JSON-RPC error.
+toolError :: Text -> ToolResult
+toolError msg = (toolResult [ContentText msg]) { toolResultIsError = True }
+
+-- | Types a tool handler may return. Returning plain 'Content' (or 'Text')
+-- keeps simple handlers simple; return a full 'ToolResult' for multiple
+-- content blocks, structured content, or execution errors.
+class ToToolResult a where
+  toToolResult :: a -> ToolResult
+
+instance ToToolResult ToolResult where
+  toToolResult = id
+
+instance ToToolResult Content where
+  toToolResult c = toolResult [c]
+
+instance ToToolResult a => ToToolResult [a] where
+  toToolResult xs = ToolResult
+    { toolResultContent = concatMap (toolResultContent . toToolResult) xs
+    , toolResultStructured = Nothing
+    , toolResultIsError = False
+    , toolResultMeta = Nothing
+    }
+
+instance ToToolResult Text where
+  toToolResult = toToolResult . ContentText
+
+-- | The full result of a prompts/get request: an optional description and
+-- a conversation of one or more messages.
+data PromptResult = PromptResult
+  { promptResultDescription :: Maybe Text
+  , promptResultMessages    :: [PromptMessage]
+  } deriving (Show, Eq, Generic)
+
+-- | Types a prompt handler may return. Plain 'Content' (or 'Text') becomes a
+-- single user message; return 'PromptResult' or @['PromptMessage']@ for
+-- multi-message conversations or assistant roles.
+class ToPromptResult a where
+  toPromptResult :: a -> PromptResult
+
+instance ToPromptResult PromptResult where
+  toPromptResult = id
+
+instance ToPromptResult PromptMessage where
+  toPromptResult m = PromptResult Nothing [m]
+
+instance ToPromptResult a => ToPromptResult [a] where
+  toPromptResult xs = PromptResult Nothing (concatMap (promptResultMessages . toPromptResult) xs)
+
+instance ToPromptResult Content where
+  toPromptResult c = toPromptResult (PromptMessage RoleUser c)
+
+instance ToPromptResult Text where
+  toPromptResult = toPromptResult . ContentText
+
 -- | MCP protocol errors
 data Error
   = InvalidPromptName Text
@@ -192,6 +317,53 @@ instance ToJSON Error where
       errorMessage (MethodNotFound msg) = "Method not found: " <> msg
       errorMessage (InvalidParams msg) = "Invalid parameters: " <> msg
 
+-- | A JSON Schema fragment: a shape plus an optional description.
+data Schema = Schema
+  { schemaDescription :: Maybe Text
+  , schemaShape       :: SchemaType
+  } deriving (Show, Eq, Generic)
+
+-- | The shape of a JSON Schema fragment.
+data SchemaType
+  = SchemaString (Maybe [Text])
+    -- ^ A string, optionally restricted to an enum of allowed values
+  | SchemaInteger
+  | SchemaNumber
+  | SchemaBoolean
+  | SchemaArray Schema
+  | SchemaObject [(Text, Schema)] [Text]
+    -- ^ Properties and the names of the required ones
+  deriving (Show, Eq, Generic)
+
+-- | A schema with no description.
+schema :: SchemaType -> Schema
+schema = Schema Nothing
+
+-- | A schema with a description.
+describedSchema :: Text -> SchemaType -> Schema
+describedSchema desc = Schema (Just desc)
+
+instance ToJSON Schema where
+  toJSON (Schema desc shape) = object $
+    typeFields shape ++ maybe [] (\d -> ["description" .= d]) desc
+    where
+      typeFields :: SchemaType -> [Pair]
+      typeFields (SchemaString enumVals) =
+        [ "type" .= ("string" :: Text) ]
+        ++ maybe [] (\vs -> ["enum" .= vs]) enumVals
+      typeFields SchemaInteger = [ "type" .= ("integer" :: Text) ]
+      typeFields SchemaNumber  = [ "type" .= ("number" :: Text) ]
+      typeFields SchemaBoolean = [ "type" .= ("boolean" :: Text) ]
+      typeFields (SchemaArray items) =
+        [ "type" .= ("array" :: Text)
+        , "items" .= items
+        ]
+      typeFields (SchemaObject props req) =
+        [ "type" .= ("object" :: Text)
+        , "properties" .= object (map (\(k, v) -> fromText k .= v) props)
+        , "required" .= req
+        ]
+
 -- | Prompt definition (2025-06-18 enhanced)
 data PromptDefinition = PromptDefinition
   { promptDefinitionName        :: Text
@@ -225,12 +397,21 @@ instance ToJSON ResourceDefinition where
     maybe [] (\m -> ["mimeType" .= m]) (resourceDefinitionMimeType def) ++
     maybe [] (\t -> ["title" .= t]) (resourceDefinitionTitle def)
 
+instance FromJSON ResourceDefinition where
+  parseJSON = withObject "ResourceDefinition" $ \o -> ResourceDefinition
+    <$> o .: "uri"
+    <*> o .: "name"
+    <*> o .:? "description"
+    <*> o .:? "mimeType"
+    <*> o .:? "title"
+
 -- | Tool definition (2025-06-18 enhanced)
 data ToolDefinition = ToolDefinition
-  { toolDefinitionName        :: Text
-  , toolDefinitionDescription :: Text
-  , toolDefinitionInputSchema :: InputSchemaDefinition
-  , toolDefinitionTitle       :: Maybe Text  -- New title field for human-friendly display
+  { toolDefinitionName         :: Text
+  , toolDefinitionDescription  :: Text
+  , toolDefinitionInputSchema  :: Schema
+  , toolDefinitionOutputSchema :: Maybe Schema
+  , toolDefinitionTitle        :: Maybe Text  -- New title field for human-friendly display
   } deriving (Show, Eq, Generic)
 
 instance ToJSON ToolDefinition where
@@ -238,7 +419,8 @@ instance ToJSON ToolDefinition where
     [ "name" .= toolDefinitionName def
     , "description" .= toolDefinitionDescription def
     , "inputSchema" .= toolDefinitionInputSchema def
-    ] ++ maybe [] (\t -> ["title" .= t]) (toolDefinitionTitle def)
+    ] ++ maybe [] (\s -> ["outputSchema" .= s]) (toolDefinitionOutputSchema def)
+      ++ maybe [] (\t -> ["title" .= t]) (toolDefinitionTitle def)
 
 -- | Argument definition for prompts
 data ArgumentDefinition = ArgumentDefinition
@@ -252,30 +434,6 @@ instance ToJSON ArgumentDefinition where
     [ "name" .= argumentDefinitionName def
     , "description" .= argumentDefinitionDescription def
     , "required" .= argumentDefinitionRequired def
-    ]
-
--- | Input schema definition for tools
-data InputSchemaDefinition = InputSchemaDefinitionObject
-  { properties :: [(Text, InputSchemaDefinitionProperty)]
-  , required   :: [Text]
-  } deriving (Show, Eq, Generic)
-
-instance ToJSON InputSchemaDefinition where
-  toJSON (InputSchemaDefinitionObject props req) = object
-    [ "type" .= ("object" :: Text)
-    , "properties" .= object (map (\(k, v) -> fromText k .= v) props)
-    , "required" .= req
-    ]
-
-data InputSchemaDefinitionProperty = InputSchemaDefinitionProperty
-  { propertyType        :: Text
-  , propertyDescription :: Text
-  } deriving (Show, Eq, Generic)
-
-instance ToJSON InputSchemaDefinitionProperty where
-  toJSON prop = object
-    [ "type" .= propertyType prop
-    , "description" .= propertyDescription prop
     ]
 
 -- | Server information
@@ -351,18 +509,21 @@ data ClientContext = ClientContext
 
 -- | Handler type definitions. Every handler receives the request's
 -- 'ClientContext' as its first argument.
-type PromptListHandler m = ClientContext -> m [PromptDefinition]
-type PromptGetHandler m = ClientContext -> PromptName -> [(ArgumentName, ArgumentValue)] -> m (Either Error Content)
+--
+-- Prompt arguments are string-valued per the MCP specification; tool
+-- arguments are full JSON values.
+type PromptListHandler = ClientContext -> IO [PromptDefinition]
+type PromptGetHandler = ClientContext -> PromptName -> Map Text Text -> IO (Either Error PromptResult)
 
-type ResourceListHandler m = ClientContext -> m [ResourceDefinition]
-type ResourceReadHandler m = ClientContext -> URI -> m (Either Error ResourceContent)
+type ResourceListHandler = ClientContext -> IO [ResourceDefinition]
+type ResourceReadHandler = ClientContext -> URI -> IO (Either Error ResourceContent)
 
-type ToolListHandler m = ClientContext -> m [ToolDefinition]
-type ToolCallHandler m = ClientContext -> ToolName -> [(ArgumentName, ArgumentValue)] -> m (Either Error Content)
+type ToolListHandler = ClientContext -> IO [ToolDefinition]
+type ToolCallHandler = ClientContext -> ToolName -> Map Text Value -> IO (Either Error ToolResult)
 
 -- | Server handlers
-data McpServerHandlers m = McpServerHandlers
-  { prompts   :: Maybe (PromptListHandler m, PromptGetHandler m)
-  , resources :: Maybe (ResourceListHandler m, ResourceReadHandler m)
-  , tools     :: Maybe (ToolListHandler m, ToolCallHandler m)
+data McpServerHandlers = McpServerHandlers
+  { prompts   :: Maybe (PromptListHandler, PromptGetHandler)
+  , resources :: Maybe (ResourceListHandler, ResourceReadHandler)
+  , tools     :: Maybe (ToolListHandler, ToolCallHandler)
   }
