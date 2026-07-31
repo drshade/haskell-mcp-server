@@ -1,6 +1,6 @@
 # Revision history for mcp-server
 
-## 0.2.0.0 - ???
+## 0.2.0.0 - 2026-07-31
 
 A major overhaul of the handler API. The headline changes: the handler
 boundary is no longer stringly typed, and the server is dual-era — it speaks
@@ -131,7 +131,7 @@ both the legacy initialize-handshake revisions and the stateless
   same bound aeson uses) so a tiny payload like `1e1000000000` cannot force
   allocation of a gigabyte-sized `Integer`.
 
-## 0.1.0.21 - ???
+## 0.1.0.21 - 2026-07-31
 
 * **BREAKING**: every handler (prompt/resource/tool; list and get/read/call)
   now receives a `ClientContext` as its first argument, so a server can behave
@@ -156,7 +156,7 @@ both the legacy initialize-handshake revisions and the stateless
 * `http-simple-example` is now built with `-threaded`, which Warp requires;
   previously every request crashed with a `TimerManager` error.
 
-## 0.1.0.20 - ???
+## 0.1.0.20 - 2026-07-31
 
 * Fix protocol version negotiation: echo back any compatible revision the client
   proposes (`2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25`) instead of
