@@ -16,6 +16,7 @@ import           Data.String              (IsString (fromString))
 import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.Encoding       as TE
+import           Data.Text.Encoding.Error (lenientDecode)
 import           Network.HTTP.Types
 import qualified Network.Wai              as Wai
 import qualified Network.Wai.Handler.Warp as Warp
@@ -77,8 +78,13 @@ mcpApplication config serverInfo handlers req respond = do
   -- Log the request
   logVerbose config $ "HTTP " ++ show (Wai.requestMethod req) ++ " " ++ T.unpack (TE.decodeUtf8 $ Wai.rawPathInfo req)
 
-  -- Authenticate and obtain the caller's principal (if any) before anything else.
+  -- Authenticate and obtain the caller's principal (if any) before anything
+  -- else. CORS preflight requests are exempt: browsers never attach
+  -- credentials to an OPTIONS preflight, and the preflight response is what
+  -- tells the browser it may send the Authorization header at all.
   decision <- case httpAuthorize config of
+    _ | Wai.requestMethod req == "OPTIONS"
+               -> pure (Just Nothing)      -- CORS preflight: no credentials
     Nothing    -> pure (Just Nothing)      -- auth disabled: allowed, no principal
     Just check -> fmap (fmap Just) (check (bearerToken req))
   case decision of
@@ -96,11 +102,15 @@ mcpApplication config serverInfo handlers req respond = do
         else respond $ Wai.responseLBS status404 [("Content-Type", "text/plain")] "Not Found"
 
 -- | The bearer token presented by a request, if any: the value following
--- @Authorization: Bearer @.
+-- @Authorization: Bearer @. The scheme is matched case-insensitively per
+-- RFC 7235, and invalid UTF-8 in the header is replaced rather than thrown.
 bearerToken :: Wai.Request -> Maybe Text
-bearerToken req =
-  lookup hAuthorization (Wai.requestHeaders req)
-    >>= T.stripPrefix "Bearer " . TE.decodeUtf8
+bearerToken req = do
+  header <- lookup hAuthorization (Wai.requestHeaders req)
+  let (scheme, rest) = T.break (== ' ') (TE.decodeUtf8With lenientDecode header)
+  if T.toCaseFold scheme == "bearer" && not (T.null rest)
+    then Just (T.stripStart rest)
+    else Nothing
 
 -- | Handle MCP requests according to Streamable HTTP specification
 handleMcpRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers IO -> ClientContext -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
@@ -150,7 +160,7 @@ handleMcpRequest config serverInfo handlers ctx req respond = do
             status200
             [ ("Access-Control-Allow-Origin", "*")
             , ("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            , ("Access-Control-Allow-Headers", "Content-Type, MCP-Protocol-Version")
+            , ("Access-Control-Allow-Headers", "Content-Type, Authorization, MCP-Protocol-Version")
             ]
             ""
 

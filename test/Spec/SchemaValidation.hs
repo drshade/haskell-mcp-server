@@ -67,7 +67,7 @@ spec = describe "Schema Validation and Custom Descriptions" $ do
 
     forM_ schemaTestCases $ \testCase -> do
       it (T.unpack $ schemaTestDescription testCase) $ do
-        toolDefs <- listHandler
+        toolDefs <- listHandler anonCtx
 
         assertToolExists (schemaToolName testCase) toolDefs
         let toolDef = findTool (schemaToolName testCase) toolDefs
@@ -82,7 +82,7 @@ spec = describe "Schema Validation and Custom Descriptions" $ do
   describe "Custom Descriptions" $ do
     it "applies correct tool descriptions" $ do
       let (listHandler, _) = testToolHandlersWithDescriptions
-      toolDefs <- listHandler
+      toolDefs <- listHandler anonCtx
 
       assertToolExists "echo" toolDefs
       let echoDef = findTool "echo" toolDefs
@@ -94,7 +94,7 @@ spec = describe "Schema Validation and Custom Descriptions" $ do
 
     it "applies correct field descriptions for Calculate tool" $ do
       let (listHandler, _) = testToolHandlersWithDescriptions
-      toolDefs <- listHandler
+      toolDefs <- listHandler anonCtx
 
       assertToolExists "calculate" toolDefs
       let calculateDef = findTool "calculate" toolDefs

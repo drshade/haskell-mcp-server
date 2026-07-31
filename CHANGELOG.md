@@ -1,5 +1,30 @@
 # Revision history for mcp-server
 
+## 0.1.0.21 - ???
+
+* **BREAKING**: every handler (prompt/resource/tool; list and get/read/call)
+  now receives a `ClientContext` as its first argument, so a server can behave
+  differently depending on who is calling. On stdio the context is anonymous;
+  on HTTP it carries the request's bearer token and the principal returned by
+  the authorization callback.
+* **BREAKING**: `HttpConfig` gains an `httpAuthorize` field — an optional
+  callback that validates the presented `Authorization: Bearer` token and
+  returns an application-defined principal (`Nothing` rejects with 401). As it
+  now holds a function, `HttpConfig` no longer derives `Show`/`Eq`.
+* HTTP transport: accept requests without an `MCP-Protocol-Version` header
+  (the spec says to assume `2025-03-26`), exempt `initialize` from the header
+  check (it negotiates its version in the body), and keep rejecting a present
+  but unsupported header with 400. Previously every request without the header
+  was rejected, locking out pre-`2025-06-18` clients.
+* `initialize` now advertises only the capabilities that actually have
+  handlers, so strict clients no longer drop the server when e.g.
+  `prompts/list` answers "not supported".
+* CORS: preflight `OPTIONS` requests are exempt from authorization (browsers
+  send no credentials on preflight) and `Authorization` is included in
+  `Access-Control-Allow-Headers`.
+* `http-simple-example` is now built with `-threaded`, which Warp requires;
+  previously every request crashed with a `TimerManager` error.
+
 ## 0.1.0.20 - ???
 
 * Fix protocol version negotiation: echo back any compatible revision the client

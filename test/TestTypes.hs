@@ -4,8 +4,12 @@ module TestTypes where
 
 import           Data.Text  (Text)
 import qualified Data.Text  as T
-import           MCP.Server (Content(..), ResourceContent(..))
+import           MCP.Server (ClientContext(..), Content(..), ResourceContent(..))
 import           Network.URI (URI)
+
+-- Context passed to handlers in tests (no transport-level identity)
+anonCtx :: ClientContext
+anonCtx = ClientContext Nothing Nothing
 
 -- Test data types for end-to-end testing
 data TestPrompt
@@ -47,49 +51,49 @@ data RecursiveTool = ProcessData MiddleParams
     deriving (Show, Eq)
 
 -- Handler functions
-handleTestPrompt :: TestPrompt -> IO Content
-handleTestPrompt (SimplePrompt msg) =
+handleTestPrompt :: ClientContext -> TestPrompt -> IO Content
+handleTestPrompt _ (SimplePrompt msg) =
     pure $ ContentText $ "Simple prompt: " <> msg
-handleTestPrompt (ComplexPrompt title prio urgent) =
+handleTestPrompt _ (ComplexPrompt title prio urgent) =
     pure $ ContentText $ "Complex prompt: " <> title <> " (priority=" <> T.pack (show prio) <> ", urgent=" <> T.pack (show urgent) <> ")"
-handleTestPrompt (OptionalPrompt req opt) =
+handleTestPrompt _ (OptionalPrompt req opt) =
     pure $ ContentText $ "Optional prompt: " <> req <> maybe "" ((" optional=" <>) . T.pack . show) opt
 
-handleTestResource :: URI -> TestResource -> IO ResourceContent
-handleTestResource uri ConfigFile =
+handleTestResource :: ClientContext -> URI -> TestResource -> IO ResourceContent
+handleTestResource _ uri ConfigFile =
     pure $ ResourceText uri "text/plain" "Config file contents: debug=true, timeout=30"
-handleTestResource uri DatabaseConnection =
+handleTestResource _ uri DatabaseConnection =
     pure $ ResourceText uri "text/plain" "Database at localhost:5432"
-handleTestResource uri UserProfile =
+handleTestResource _ uri UserProfile =
     pure $ ResourceText uri "text/plain" "User profile for ID 123"
 
-handleTestTool :: TestTool -> IO Content
-handleTestTool (Echo text) =
+handleTestTool :: ClientContext -> TestTool -> IO Content
+handleTestTool _ (Echo text) =
     pure $ ContentText $ "Echo: " <> text
-handleTestTool (Calculate op x y) =
+handleTestTool _ (Calculate op x y) =
     let result = case op of
             "add" -> x + y
             "multiply" -> x * y
             "subtract" -> x - y
             _ -> 0
     in pure $ ContentText $ T.pack (show result)
-handleTestTool (Toggle flag) =
+handleTestTool _ (Toggle flag) =
     pure $ ContentText $ "Flag is now: " <> T.pack (show (not flag))
-handleTestTool (Search query limit caseSens) =
+handleTestTool _ (Search query limit caseSens) =
     pure $ ContentText $ "Search results for '" <> query <> "'" <>
         maybe "" ((" (limit=" <>) . (<> ")") . T.pack . show) limit <>
         maybe "" ((" (case-sensitive=" <>) . (<> ")") . T.pack . show) caseSens
 
 -- Handler for separate params tool
-handleSeparateParamsTool :: SeparateParamsTool -> IO Content
-handleSeparateParamsTool (GetValue (GetValueParams key)) =
+handleSeparateParamsTool :: ClientContext -> SeparateParamsTool -> IO Content
+handleSeparateParamsTool _ (GetValue (GetValueParams key)) =
     pure $ ContentText $ "Getting value for key: " <> key
-handleSeparateParamsTool (SetValue (SetValueParams key value)) =
+handleSeparateParamsTool _ (SetValue (SetValueParams key value)) =
     pure $ ContentText $ "Setting " <> key <> " = " <> value
 
 -- Handler for recursive tool
-handleRecursiveTool :: RecursiveTool -> IO Content
-handleRecursiveTool (ProcessData (MiddleParams (InnerParams name age))) =
+handleRecursiveTool :: ClientContext -> RecursiveTool -> IO Content
+handleRecursiveTool _ (ProcessData (MiddleParams (InnerParams name age))) =
     pure $ ContentText $ "Processing data for " <> name <> " (age " <> T.pack (show age) <> ")"
 
 -- Type covering all parseable field types for exhaustive parsing tests
@@ -112,8 +116,8 @@ data AllTypesTool
         }
     deriving (Show, Eq)
 
-handleAllTypesTool :: AllTypesTool -> IO Content
-handleAllTypesTool (RequiredFields t i ig d f b) =
+handleAllTypesTool :: ClientContext -> AllTypesTool -> IO Content
+handleAllTypesTool _ (RequiredFields t i ig d f b) =
     pure $ ContentText $ T.intercalate ", "
         [ "text=" <> t
         , "int=" <> T.pack (show i)
@@ -122,7 +126,7 @@ handleAllTypesTool (RequiredFields t i ig d f b) =
         , "float=" <> T.pack (show f)
         , "bool=" <> T.pack (show b)
         ]
-handleAllTypesTool (OptionalFields t i ig d f b) =
+handleAllTypesTool _ (OptionalFields t i ig d f b) =
     pure $ ContentText $ T.intercalate ", "
         [ "text=" <> maybe "Nothing" id t
         , "int=" <> maybe "Nothing" (T.pack . show) i

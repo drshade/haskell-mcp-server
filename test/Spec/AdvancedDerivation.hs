@@ -42,7 +42,7 @@ assertSchemaHasProperties expectedProps toolDef = do
 
 assertToolCallResult :: (ToolCallHandler IO) -> Text -> [(Text, Text)] -> Text -> IO ()
 assertToolCallResult handler toolName args expectedContent = do
-  result <- handler toolName args
+  result <- handler anonCtx toolName args
   case result of
     Right (ContentText content) -> content `shouldBe` expectedContent
     other -> expectationFailure $ "Expected ContentText but got: " ++ show other
@@ -66,7 +66,7 @@ spec = describe "Advanced Template Haskell Derivation" $ do
   describe "Separate Parameter Types" $ do
     it "generates correct schema for separate parameter tools" $ do
       let (listHandler, _) = testSeparateParamsToolHandlers
-      toolDefs <- listHandler
+      toolDefs <- listHandler anonCtx
 
       -- Test GetValue tool schema
       let getValueDef = findToolByName "get_value" toolDefs
@@ -84,7 +84,7 @@ spec = describe "Advanced Template Haskell Derivation" $ do
   describe "Recursive Parameter Types" $ do
     it "generates correct schema for recursive parameter tools" $ do
       let (listHandler, _) = testRecursiveToolHandlers
-      toolDefs <- listHandler
+      toolDefs <- listHandler anonCtx
 
       let processDataDef = findToolByName "process_data" toolDefs
       assertSchemaHasProperties ["_ipName", "_ipAge"] processDataDef
@@ -97,7 +97,7 @@ spec = describe "Advanced Template Haskell Derivation" $ do
   describe "Custom Descriptions with Separate Parameters" $ do
     it "applies correct tool descriptions for separate parameter tools" $ do
       let (listHandler, _) = testSeparateParamsToolHandlersWithDescriptions
-      toolDefs <- listHandler
+      toolDefs <- listHandler anonCtx
 
       let getValueDef = findToolByName "get_value" toolDefs
       assertToolHasDescription "get_value" "Retrieves a value from the key-value store" getValueDef
@@ -107,7 +107,7 @@ spec = describe "Advanced Template Haskell Derivation" $ do
 
     it "applies correct field descriptions for separate parameter tools" $ do
       let (listHandler, _) = testSeparateParamsToolHandlersWithDescriptions
-      toolDefs <- listHandler
+      toolDefs <- listHandler anonCtx
 
       let getValueDef = findToolByName "get_value" toolDefs
       assertPropertyHasDescription "_gvpKey" "The key to retrieve the value for" getValueDef
@@ -119,14 +119,14 @@ spec = describe "Advanced Template Haskell Derivation" $ do
   describe "Recursive Tool Descriptions" $ do
     it "applies correct descriptions for recursive parameter tools" $ do
       let (listHandler, _) = testRecursiveToolHandlersWithDescriptions
-      toolDefs <- listHandler
+      toolDefs <- listHandler anonCtx
 
       let processDataDef = findToolByName "process_data" toolDefs
       assertToolHasDescription "process_data" "Processes user data with age validation" processDataDef
 
     it "applies correct field descriptions for recursive parameters" $ do
       let (listHandler, _) = testRecursiveToolHandlersWithDescriptions
-      toolDefs <- listHandler
+      toolDefs <- listHandler anonCtx
 
       let processDataDef = findToolByName "process_data" toolDefs
       assertPropertyHasDescription "_ipName" "The person's full name" processDataDef

@@ -215,24 +215,26 @@ spec = describe "Unicode Handling" $ do
               Nothing -> return $ Left $ MissingRequiredParams "expression"
             _ -> return $ Left $ UnknownTool name
 
+      -- Handlers above ignore the per-request client context
+      let ctx = ClientContext Nothing Nothing
       let handlers = McpServerHandlers
-            { prompts = Just (promptListHandler, promptGetHandler)
-            , resources = Just (resourceListHandler, resourceReadHandler)
-            , tools = Just (toolListHandler, toolCallHandler)
+            { prompts = Just (const promptListHandler, const promptGetHandler)
+            , resources = Just (const resourceListHandler, const resourceReadHandler)
+            , tools = Just (const toolListHandler, const toolCallHandler)
             }
 
       -- Test that all handlers work with Unicode
-      promptList <- fst $ case prompts handlers of Just h -> h; Nothing -> error "No prompts"
+      promptList <- ($ ctx) $ fst $ case prompts handlers of Just h -> h; Nothing -> error "No prompts"
       promptList `shouldSatisfy` (not . null)
 
-      resourceList <- fst $ case resources handlers of Just h -> h; Nothing -> error "No resources"
+      resourceList <- ($ ctx) $ fst $ case resources handlers of Just h -> h; Nothing -> error "No resources"
       resourceList `shouldSatisfy` (not . null)
 
-      toolList <- fst $ case tools handlers of Just h -> h; Nothing -> error "No tools"
+      toolList <- ($ ctx) $ fst $ case tools handlers of Just h -> h; Nothing -> error "No tools"
       toolList `shouldSatisfy` (not . null)
 
       -- Test actual Unicode handling
-      promptResult <- snd (case prompts handlers of Just h -> h; Nothing -> error "No prompts") "math_formula" [("formula", "√(x²+y²)")]
+      promptResult <- snd (case prompts handlers of Just h -> h; Nothing -> error "No prompts") ctx "math_formula" [("formula", "√(x²+y²)")]
       case promptResult of
         Right (ContentText txt) -> txt `shouldSatisfy` T.isInfixOf "√"
         _ -> expectationFailure "Expected successful prompt result"
@@ -240,12 +242,12 @@ spec = describe "Unicode Handling" $ do
       uri <- case parseURI "resource://unicode_symbols" of
         Just u  -> return u
         Nothing -> fail "Invalid URI"
-      resourceResult <- snd (case resources handlers of Just h -> h; Nothing -> error "No resources") uri
+      resourceResult <- snd (case resources handlers of Just h -> h; Nothing -> error "No resources") ctx uri
       case resourceResult of
         Right (ResourceText _ _ txt) -> txt `shouldSatisfy` T.isInfixOf "∀∃∈∉"
         _ -> expectationFailure "Expected successful resource result"
 
-      toolResult <- snd (case tools handlers of Just h -> h; Nothing -> error "No tools") "calculate" [("expression", "∫₀^∞ e^(-x²) dx = √π/2")]
+      toolResult <- snd (case tools handlers of Just h -> h; Nothing -> error "No tools") ctx "calculate" [("expression", "∫₀^∞ e^(-x²) dx = √π/2")]
       case toolResult of
         Right (ContentText txt) -> do
           txt `shouldSatisfy` T.isInfixOf "√"

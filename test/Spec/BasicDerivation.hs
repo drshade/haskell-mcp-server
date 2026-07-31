@@ -40,13 +40,13 @@ shouldContainText action expectedSubstring = do
 
 testPromptCall :: PromptGetHandler IO -> Text -> [(Text, Text)] -> Text -> IO ()
 testPromptCall handler name args expected =
-  shouldReturnContentText (handler name args) expected
+  shouldReturnContentText (handler anonCtx name args) expected
 
 testResourceCall :: ResourceReadHandler IO -> String -> Text -> IO ()
 testResourceCall handler uriString expected = do
   case parseURI uriString of
     Just uri -> do
-      result <- handler uri
+      result <- handler anonCtx uri
       case result of
         Right (ResourceText _ _ content) -> content `shouldBe` expected
         Right (ResourceBlob _ _ _) -> expectationFailure "Expected ResourceText but got ResourceBlob"
@@ -55,7 +55,7 @@ testResourceCall handler uriString expected = do
 
 testToolCall :: ToolCallHandler IO -> Text -> [(Text, Text)] -> Text -> IO ()
 testToolCall handler name args expected =
-  shouldReturnContentText (handler name args) expected
+  shouldReturnContentText (handler anonCtx name args) expected
 
 spec :: Spec
 spec = describe "Basic Template Haskell Derivation" $ do
@@ -76,7 +76,7 @@ spec = describe "Basic Template Haskell Derivation" $ do
           Just uri ->
             if useSubstringMatch testCase
               then do
-                result <- readHandler uri
+                result <- readHandler anonCtx uri
                 case result of
                   Right (ResourceText _ _ content) ->
                     T.isInfixOf (resourceExpectedContent testCase) content `shouldBe` True
