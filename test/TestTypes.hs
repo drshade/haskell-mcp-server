@@ -4,7 +4,10 @@ module TestTypes where
 
 import           Data.Text  (Text)
 import qualified Data.Text  as T
-import           MCP.Server (ClientContext(..), Content(..), ResourceContent(..))
+import           MCP.Server (ClientContext (..), Content (..), MessageRole (..),
+                             PromptMessage (..), PromptResult (..),
+                             ResourceContent (..), ToolResult, toolError,
+                             toolResult)
 import           Network.URI (URI)
 
 -- Context passed to handlers in tests (no transport-level identity)
@@ -135,6 +138,44 @@ handleAllTypesTool _ (OptionalFields t i ig d f b) =
         , "float=" <> maybe "Nothing" (T.pack . show) f
         , "bool=" <> maybe "Nothing" (T.pack . show) b
         ]
+
+-- Types exercising 0.2 typed arguments: enums, lists, nested records
+data Color = Red | Green | Blue
+    deriving (Show, Eq)
+
+data Filters = Filters { tags :: [Text], maxCount :: Maybe Int }
+    deriving (Show, Eq)
+
+data TypedTool
+    = Paint { color :: Color, brightness :: Int }
+    | BulkAdd { values :: [Int] }
+    | QueryData { filters :: Filters }
+    | AlwaysFails { reason :: Text }
+    deriving (Show, Eq)
+
+handleTypedTool :: ClientContext -> TypedTool -> IO ToolResult
+handleTypedTool _ (Paint c b) =
+    pure $ toolResult [ContentText $ "Painting " <> T.pack (show c) <> " at " <> T.pack (show b)]
+handleTypedTool _ (BulkAdd vs) =
+    pure $ toolResult [ContentText $ "Sum: " <> T.pack (show (sum vs))]
+handleTypedTool _ (QueryData (Filters ts mc)) =
+    pure $ toolResult [ContentText $ "Query tags=" <> T.intercalate "," ts
+                        <> maybe "" ((" max=" <>) . T.pack . show) mc]
+handleTypedTool _ (AlwaysFails msg) =
+    pure $ toolError msg
+
+-- A prompt whose handler produces a multi-message conversation
+data ConvPrompt = Conversation { topic :: Text }
+    deriving (Show, Eq)
+
+handleConvPrompt :: ClientContext -> ConvPrompt -> IO PromptResult
+handleConvPrompt _ (Conversation t) = pure $ PromptResult
+    { promptResultDescription = Just ("About " <> t)
+    , promptResultMessages =
+        [ PromptMessage RoleUser (ContentText ("Tell me about " <> t))
+        , PromptMessage RoleAssistant (ContentText ("Here is what I know about " <> t))
+        ]
+    }
 
 -- Test descriptions for custom description functionality
 testDescriptions :: [(String, String)]

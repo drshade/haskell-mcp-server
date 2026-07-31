@@ -176,8 +176,10 @@ test-suite haskell-mcp-server-test
     Spec.ProtocolVersionNegotiation
     Spec.SchemaValidation
     Spec.ToolCallParsing
+    Spec.TypedArgs
     Spec.UnicodeHandling
     TestData
+    TestHelpers
     TestTypes
 
   -- LANGUAGE extensions used by modules in this package.
@@ -194,6 +196,7 @@ test-suite haskell-mcp-server-test
     aeson,
     base,
     bytestring,
+    containers,
     hspec,
     mcp-server,
     network-uri,

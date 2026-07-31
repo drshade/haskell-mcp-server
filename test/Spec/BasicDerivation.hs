@@ -9,40 +9,26 @@ import qualified Data.Text as T
 import MCP.Server
 import MCP.Server.Derive
 import Test.Hspec
+import TestHelpers
 import TestTypes
 import TestData
 
 -- Generate handlers using Template Haskell
-testPromptHandlers :: (PromptListHandler IO, PromptGetHandler IO)
+testPromptHandlers :: (PromptListHandler, PromptGetHandler)
 testPromptHandlers = $(derivePromptHandler ''TestPrompt 'handleTestPrompt)
 
-testResourceHandlers :: (ResourceListHandler IO, ResourceReadHandler IO)
+testResourceHandlers :: (ResourceListHandler, ResourceReadHandler)
 testResourceHandlers = $(deriveResourceHandler ''TestResource 'handleTestResource)
 
-testToolHandlers :: (ToolListHandler IO, ToolCallHandler IO)
+testToolHandlers :: (ToolListHandler, ToolCallHandler)
 testToolHandlers = $(deriveToolHandler ''TestTool 'handleTestTool)
 
--- Helper functions for common test patterns
-shouldReturnContentText :: IO (Either Error Content) -> Text -> IO ()
-shouldReturnContentText action expected = do
-  result <- action
-  case result of
-    Right (ContentText content) -> content `shouldBe` expected
-    other -> expectationFailure $ "Expected ContentText '" ++ T.unpack expected ++ "' but got: " ++ show other
+testPromptCall :: PromptGetHandler -> Text -> [(Text, Text)] -> Text -> IO ()
+testPromptCall handler name args expected = do
+  result <- handler anonCtx name (promptArgsMap args)
+  result `shouldBePromptText` expected
 
-shouldContainText :: IO (Either Error Content) -> Text -> IO ()
-shouldContainText action expectedSubstring = do
-  result <- action
-  case result of
-    Right (ContentText content) ->
-      T.isInfixOf expectedSubstring content `shouldBe` True
-    other -> expectationFailure $ "Expected ContentText containing '" ++ T.unpack expectedSubstring ++ "' but got: " ++ show other
-
-testPromptCall :: PromptGetHandler IO -> Text -> [(Text, Text)] -> Text -> IO ()
-testPromptCall handler name args expected =
-  shouldReturnContentText (handler anonCtx name args) expected
-
-testResourceCall :: ResourceReadHandler IO -> String -> Text -> IO ()
+testResourceCall :: ResourceReadHandler -> String -> Text -> IO ()
 testResourceCall handler uriString expected = do
   case parseURI uriString of
     Just uri -> do
@@ -53,9 +39,10 @@ testResourceCall handler uriString expected = do
         Left err -> expectationFailure $ "Expected success but got error: " ++ show err
     Nothing -> expectationFailure $ "Failed to parse URI: " ++ uriString
 
-testToolCall :: ToolCallHandler IO -> Text -> [(Text, Text)] -> Text -> IO ()
-testToolCall handler name args expected =
-  shouldReturnContentText (handler anonCtx name args) expected
+testToolCall :: ToolCallHandler -> Text -> [(Text, Text)] -> Text -> IO ()
+testToolCall handler name args expected = do
+  result <- handler anonCtx name (stringArgs args)
+  result `shouldBeTextResult` expected
 
 spec :: Spec
 spec = describe "Basic Template Haskell Derivation" $ do

@@ -9,14 +9,15 @@ import qualified Data.Text as T
 import MCP.Server
 import MCP.Server.Derive
 import Test.Hspec
+import TestHelpers
 import TestTypes
 import TestData
 
 -- Generate handlers for testing
-testToolHandlers :: (ToolListHandler IO, ToolCallHandler IO)
+testToolHandlers :: (ToolListHandler, ToolCallHandler)
 testToolHandlers = $(deriveToolHandler ''TestTool 'handleTestTool)
 
-testToolHandlersWithDescriptions :: (ToolListHandler IO, ToolCallHandler IO)
+testToolHandlersWithDescriptions :: (ToolListHandler, ToolCallHandler)
 testToolHandlersWithDescriptions = $(deriveToolHandlerWithDescription ''TestTool 'handleTestTool testDescriptions)
 
 -- Helper functions for schema validation
@@ -27,13 +28,11 @@ findTool toolName toolDefs =
     [] -> error $ "Tool not found: " ++ T.unpack toolName
     _ -> error $ "Multiple tools found with name: " ++ T.unpack toolName
 
-getProperty :: Text -> ToolDefinition -> InputSchemaDefinitionProperty
+getProperty :: Text -> ToolDefinition -> Schema
 getProperty propertyName toolDef =
-  case toolDefinitionInputSchema toolDef of
-    InputSchemaDefinitionObject props _ ->
-      case lookup propertyName props of
-        Just prop -> prop
-        Nothing -> error $ "Property not found: " ++ T.unpack propertyName
+  case lookupProp propertyName toolDef of
+    Just prop -> prop
+    Nothing -> error $ "Property not found: " ++ T.unpack propertyName
 
 assertToolExists :: Text -> [ToolDefinition] -> IO ()
 assertToolExists toolName toolDefs = do
@@ -42,18 +41,17 @@ assertToolExists toolName toolDefs = do
 assertHasProperty :: Text -> Text -> ToolDefinition -> IO ()
 assertHasProperty propertyName expectedType toolDef = do
   let prop = getProperty propertyName toolDef
-  propertyType prop `shouldBe` expectedType
+  schemaTypeName prop `shouldBe` expectedType
 
 assertPropertyDescription :: Text -> ToolDefinition -> Text -> IO ()
 assertPropertyDescription propertyName toolDef expectedDesc = do
   let prop = getProperty propertyName toolDef
-  propertyDescription prop `shouldBe` expectedDesc
+  schemaDescription prop `shouldBe` Just expectedDesc
 
 assertRequiredFields :: [Text] -> ToolDefinition -> IO ()
 assertRequiredFields expectedFields toolDef = do
-  case toolDefinitionInputSchema toolDef of
-    InputSchemaDefinitionObject _ required ->
-      all (`elem` required) expectedFields `shouldBe` True
+  let required = schemaRequired (toolDefinitionInputSchema toolDef)
+  all (`elem` required) expectedFields `shouldBe` True
 
 assertToolDescription :: ToolDefinition -> Text -> IO ()
 assertToolDescription toolDef expectedDesc =

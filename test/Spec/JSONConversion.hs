@@ -5,7 +5,7 @@ module Spec.JSONConversion (spec) where
 import Data.Aeson (toJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
-import MCP.Server
+import MCP.Server.Handlers (jsonValueToText)
 import Test.Hspec
 import Test.QuickCheck
 import Text.Read (readMaybe)

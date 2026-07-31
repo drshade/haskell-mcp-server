@@ -9,20 +9,21 @@ import qualified Data.Text as T
 import MCP.Server
 import MCP.Server.Derive
 import Test.Hspec
+import TestHelpers
 import TestTypes
 import TestData
 
 -- Generate advanced handlers for separate parameter types
-testSeparateParamsToolHandlers :: (ToolListHandler IO, ToolCallHandler IO)
+testSeparateParamsToolHandlers :: (ToolListHandler, ToolCallHandler)
 testSeparateParamsToolHandlers = $(deriveToolHandler ''SeparateParamsTool 'handleSeparateParamsTool)
 
-testRecursiveToolHandlers :: (ToolListHandler IO, ToolCallHandler IO)
+testRecursiveToolHandlers :: (ToolListHandler, ToolCallHandler)
 testRecursiveToolHandlers = $(deriveToolHandler ''RecursiveTool 'handleRecursiveTool)
 
-testSeparateParamsToolHandlersWithDescriptions :: (ToolListHandler IO, ToolCallHandler IO)
+testSeparateParamsToolHandlersWithDescriptions :: (ToolListHandler, ToolCallHandler)
 testSeparateParamsToolHandlersWithDescriptions = $(deriveToolHandlerWithDescription ''SeparateParamsTool 'handleSeparateParamsTool separateParamsDescriptions)
 
-testRecursiveToolHandlersWithDescriptions :: (ToolListHandler IO, ToolCallHandler IO)
+testRecursiveToolHandlersWithDescriptions :: (ToolListHandler, ToolCallHandler)
 testRecursiveToolHandlersWithDescriptions = $(deriveToolHandlerWithDescription ''RecursiveTool 'handleRecursiveTool separateParamsDescriptions)
 
 -- Helper functions for advanced testing
@@ -35,17 +36,13 @@ findToolByName toolName toolDefs =
 
 assertSchemaHasProperties :: [Text] -> ToolDefinition -> IO ()
 assertSchemaHasProperties expectedProps toolDef = do
-  case toolDefinitionInputSchema toolDef of
-    InputSchemaDefinitionObject props _ ->
-      let propNames = map fst props
-      in all (`elem` propNames) expectedProps `shouldBe` True
+  let propNames = map fst (schemaProps (toolDefinitionInputSchema toolDef))
+  all (`elem` propNames) expectedProps `shouldBe` True
 
-assertToolCallResult :: (ToolCallHandler IO) -> Text -> [(Text, Text)] -> Text -> IO ()
+assertToolCallResult :: ToolCallHandler -> Text -> [(Text, Text)] -> Text -> IO ()
 assertToolCallResult handler toolName args expectedContent = do
-  result <- handler anonCtx toolName args
-  case result of
-    Right (ContentText content) -> content `shouldBe` expectedContent
-    other -> expectationFailure $ "Expected ContentText but got: " ++ show other
+  result <- handler anonCtx toolName (stringArgs args)
+  result `shouldBeTextResult` expectedContent
 
 assertToolHasDescription :: Text -> Text -> ToolDefinition -> IO ()
 assertToolHasDescription toolName expectedDesc toolDef = do
@@ -54,11 +51,9 @@ assertToolHasDescription toolName expectedDesc toolDef = do
 
 assertPropertyHasDescription :: Text -> Text -> ToolDefinition -> IO ()
 assertPropertyHasDescription propName expectedDesc toolDef = do
-  case toolDefinitionInputSchema toolDef of
-    InputSchemaDefinitionObject props _ ->
-      case lookup propName props of
-        Just prop -> propertyDescription prop `shouldBe` expectedDesc
-        Nothing -> expectationFailure $ "Property not found: " ++ T.unpack propName
+  case lookupProp propName toolDef of
+    Just prop -> schemaDescription prop `shouldBe` Just expectedDesc
+    Nothing -> expectationFailure $ "Property not found: " ++ T.unpack propName
 
 spec :: Spec
 spec = describe "Advanced Template Haskell Derivation" $ do

@@ -5,6 +5,7 @@ module Spec.UnicodeHandling (spec) where
 import           Data.Aeson
 import qualified Data.Aeson.KeyMap    as KM
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.Map             as Map
 import qualified Data.Text            as T
 import qualified Data.Text.Encoding   as TE
 import           MCP.Server.Protocol
@@ -61,7 +62,8 @@ spec = describe "Unicode Handling" $ do
       let response = ToolsCallResponse
             { toolsCallContent = [ContentText "Result: √16 = 4, π ≈ 3.14159"]
             , toolsCallIsError = Nothing
-            , toolsCallMeta = Nothing  -- 2025-06-18: New _meta field
+            , toolsCallStructuredContent = Nothing
+            , toolsCallMeta = Nothing
             }
       let encoded = encode response
       -- Just verify the JSON can be encoded and contains Unicode
@@ -87,7 +89,8 @@ spec = describe "Unicode Handling" $ do
       let response = ToolsCallResponse
             { toolsCallContent = [ContentText "Mathematical result: √(π²+e²) ≈ 4.53"]
             , toolsCallIsError = Nothing
-            , toolsCallMeta = Nothing  -- 2025-06-18: New _meta field
+            , toolsCallStructuredContent = Nothing
+            , toolsCallMeta = Nothing
             }
       let json = toJSON response
       -- Verify the JSON can be encoded and contains Unicode
@@ -177,8 +180,8 @@ spec = describe "Unicode Handling" $ do
             ]
 
       let promptGetHandler name args = case name of
-            "math_formula" -> case lookup "formula" args of
-              Just formula -> return $ Right $ ContentText $ "Formula: " <> formula <> " → √(solution)"
+            "math_formula" -> case Map.lookup "formula" args of
+              Just formula -> return $ Right $ toPromptResult $ ContentText $ "Formula: " <> formula <> " → √(solution)"
               Nothing -> return $ Left $ MissingRequiredParams "formula"
             _ -> return $ Left $ InvalidPromptName name
 
@@ -201,18 +204,18 @@ spec = describe "Unicode Handling" $ do
             ToolDefinition
               { toolDefinitionName = "calculate"
               , toolDefinitionDescription = "Calculate with Unicode symbols: √∑∏"
-              , toolDefinitionInputSchema = InputSchemaDefinitionObject
-                  { properties = [("expression", InputSchemaDefinitionProperty "string" "Mathematical expression")]
-                  , required = ["expression"]
-                  }
+              , toolDefinitionInputSchema = schema $ SchemaObject
+                  [("expression", describedSchema "Mathematical expression" (SchemaString Nothing))]
+                  ["expression"]
+              , toolDefinitionOutputSchema = Nothing
               , toolDefinitionTitle = Nothing  -- 2025-06-18: New title field
               }
             ]
 
       let toolCallHandler name args = case name of
-            "calculate" -> case lookup "expression" args of
-              Just expr -> return $ Right $ ContentText $ "Result: " <> expr <> " → √answer"
-              Nothing -> return $ Left $ MissingRequiredParams "expression"
+            "calculate" -> case Map.lookup "expression" args of
+              Just (String expr) -> return $ Right $ toToolResult $ ContentText $ "Result: " <> expr <> " → √answer"
+              _ -> return $ Left $ MissingRequiredParams "expression"
             _ -> return $ Left $ UnknownTool name
 
       -- Handlers above ignore the per-request client context
@@ -234,9 +237,9 @@ spec = describe "Unicode Handling" $ do
       toolList `shouldSatisfy` (not . null)
 
       -- Test actual Unicode handling
-      promptResult <- snd (case prompts handlers of Just h -> h; Nothing -> error "No prompts") ctx "math_formula" [("formula", "√(x²+y²)")]
+      promptResult <- snd (case prompts handlers of Just h -> h; Nothing -> error "No prompts") ctx "math_formula" (Map.fromList [("formula", "√(x²+y²)")])
       case promptResult of
-        Right (ContentText txt) -> txt `shouldSatisfy` T.isInfixOf "√"
+        Right (PromptResult _ [PromptMessage _ (ContentText txt)]) -> txt `shouldSatisfy` T.isInfixOf "√"
         _ -> expectationFailure "Expected successful prompt result"
 
       uri <- case parseURI "resource://unicode_symbols" of
@@ -247,9 +250,9 @@ spec = describe "Unicode Handling" $ do
         Right (ResourceText _ _ txt) -> txt `shouldSatisfy` T.isInfixOf "∀∃∈∉"
         _ -> expectationFailure "Expected successful resource result"
 
-      toolResult <- snd (case tools handlers of Just h -> h; Nothing -> error "No tools") ctx "calculate" [("expression", "∫₀^∞ e^(-x²) dx = √π/2")]
-      case toolResult of
-        Right (ContentText txt) -> do
+      callResult <- snd (case tools handlers of Just h -> h; Nothing -> error "No tools") ctx "calculate" (Map.fromList [("expression", String "∫₀^∞ e^(-x²) dx = √π/2")])
+      case callResult of
+        Right tr | [ContentText txt] <- toolResultContent tr -> do
           txt `shouldSatisfy` T.isInfixOf "√"
           txt `shouldSatisfy` T.isInfixOf "∫"
         _ -> expectationFailure "Expected successful tool result"
