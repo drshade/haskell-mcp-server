@@ -14,7 +14,8 @@ import MCP.Server
 import MCP.Server.Handlers (handleMcpMessage)
 import MCP.Server.JsonRpc
 import MCP.Server.Transport.Http (BodyPeek (..), decodeSentinel, peekBody,
-                                  peekIsModern, validateRequestHeaders)
+                                  peekIsModern, validateRequestHeaders,
+                                  wantsStreamingResponse)
 import qualified Network.Wai as Wai
 import Test.Hspec
 
@@ -217,6 +218,25 @@ spec = describe "Dual-era protocol support" $ do
       fmap errorCode (validateRequestHeaders
         (reqWith [("MCP-Protocol-Version", "1999-01-01")])
         (peekBody legacyBody)) `shouldBe` Just (-32600)
+
+  describe "Streaming-response selection" $ do
+    let tokenMeta = "\"_meta\":{\"progressToken\":\"t1\"}"
+
+    it "streams dispatchable requests that carry a progressToken" $ do
+      let body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"x\",\"arguments\":{}," <> tokenMeta <> "}}"
+      wantsStreamingResponse (peekBody body) `shouldBe` True
+
+    it "keeps unknown methods on the JSON path so they retain their 404" $ do
+      let body = "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"subscriptions/listen\",\"params\":{" <> tokenMeta <> "}}"
+      wantsStreamingResponse (peekBody body) `shouldBe` False
+
+    it "keeps notification bodies on the JSON path so they retain their 202" $ do
+      let body = "{\"jsonrpc\":\"2.0\",\"method\":\"tools/call\",\"params\":{\"name\":\"x\"," <> tokenMeta <> "}}"
+      wantsStreamingResponse (peekBody body) `shouldBe` False
+
+    it "does not stream token-less requests" $ do
+      let body = "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"x\"}}"
+      wantsStreamingResponse (peekBody body) `shouldBe` False
 
   describe "Sentinel decoding" $ do
     it "passes plain values through" $

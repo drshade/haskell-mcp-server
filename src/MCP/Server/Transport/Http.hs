@@ -12,6 +12,7 @@ module MCP.Server.Transport.Http
   , BodyPeek(..)
   , peekBody
   , peekIsModern
+  , wantsStreamingResponse
   , validateRequestHeaders
   , decodeSentinel
   ) where
@@ -241,8 +242,10 @@ handleMcpRequest config serverInfo handlers ctx req respond = do
           , Just src <- httpNotifications config
           -> handleSubscriptionsListen config src body respond
           -- Requests that opted into request-scoped notifications get an
-          -- SSE response stream carrying them before the final response
-          | peekWantsStream peek
+          -- SSE response stream carrying them before the final response —
+          -- but only for dispatchable request methods, so unknown methods
+          -- keep their 404 and notification bodies keep their 202
+          | wantsStreamingResponse peek
           -> handleStreamingRequest config serverInfo handlers ctx body respond
           | otherwise -> do
               logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
@@ -271,11 +274,35 @@ data BodyPeek = BodyPeek
   , peekMetaVersion :: Maybe Text
   , peekName        :: Maybe Text  -- ^ params.name or params.uri
   , peekId          :: RequestId
+  , peekHasId       :: Bool
+      -- ^ Whether an @id@ member is present at all ('peekId' alone
+      -- conflates an absent id — a notification — with an explicit null)
   , peekWantsStream :: Bool
       -- ^ The request opted into request-scoped notifications
       -- (@_meta.progressToken@ or @_meta.\"io.modelcontextprotocol/logLevel\"@),
       -- so the response must be an SSE stream that can carry them
   }
+
+-- | Methods that run user handlers and may therefore emit request-scoped
+-- notifications. Only these upgrade to an SSE response stream: everything
+-- else keeps the JSON path so pre-dispatch outcomes retain their
+-- spec-mandated HTTP statuses (404 for unknown methods, 202 for
+-- notifications) — 'Wai.responseStream' would commit @200@ before dispatch
+-- could veto it.
+streamableMethods :: [Text]
+streamableMethods =
+  [ "tools/call", "tools/list"
+  , "prompts/get", "prompts/list"
+  , "resources/read", "resources/list", "resources/templates/list"
+  , "completion/complete"
+  ]
+
+-- | Whether this request is answered with an SSE response stream.
+wantsStreamingResponse :: BodyPeek -> Bool
+wantsStreamingResponse peek =
+  peekWantsStream peek
+    && peekHasId peek
+    && maybe False (`elem` streamableMethods) (peekMethod peek)
 
 -- | Whether the body declares a modern (2026-07-28+) request.
 peekIsModern :: BodyPeek -> Bool
@@ -298,6 +325,7 @@ peekBody body = case decode body of
     , peekId = case KM.lookup "id" o of
         Just v  -> either (const RequestIdNull) id (parseEither parseJSON v)
         Nothing -> RequestIdNull
+    , peekHasId = KM.member "id" o
     , peekWantsStream = case KM.lookup "params" o of
         Just (Object p) -> case KM.lookup "_meta" p of
           Just (Object m) ->
@@ -306,7 +334,7 @@ peekBody body = case decode body of
           _ -> False
         _ -> False
     }
-  _ -> BodyPeek Nothing Nothing Nothing RequestIdNull False
+  _ -> BodyPeek Nothing Nothing Nothing RequestIdNull False False
 
 -- | Validate the request-metadata headers against the body. 'Nothing' means
 -- the request may proceed; @'Just' err@ is answered with 400 and the given
