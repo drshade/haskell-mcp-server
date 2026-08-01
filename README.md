@@ -348,6 +348,39 @@ application; the library only threads the identity through:
 - Origin validation via `httpAllowedOrigins`
 - Cacheability hints for modern list/read results via `httpCacheHints`
 
+### Embedding in an existing WAI stack
+
+`runMcpServerHttp` starts its own Warp server, but the MCP endpoint is a
+plain [WAI](https://hackage.haskell.org/package/wai) application underneath,
+and it is exported — so you can mount it inside whatever you already run
+(your own Warp settings, TLS, middleware, or a larger router):
+
+```haskell
+import MCP.Server (mcpApplication, defaultHttpConfig)
+import qualified Network.Wai.Handler.Warp as Warp
+
+main :: IO ()
+main = Warp.runSettings mySettings $ \req respond ->
+    -- route /mcp to the MCP endpoint, everything else to your app
+    mcpApplication defaultHttpConfig serverInfo handlers req respond
+```
+
+`httpPort`/`httpHost` are ignored when embedding (they only configure the
+server `runMcpServerHttp` starts); the endpoint path, Origin validation,
+bearer auth and `subscriptions/listen` streaming all apply as usual.
+
+## Conformance corpus
+
+The wire-format fixtures under
+[`test/golden/`](test/golden/README.md) double as an **API-agnostic MCP
+conformance corpus**: each case is a raw JSON-RPC `.request.json` and the
+exact `.response.json` a reference server answers, per protocol era
+(legacy `initialize`-negotiated revisions and the stateless `2026-07-28`
+revision), enumerated by a `manifest.json`. Nothing in the corpus is
+Haskell-specific — any MCP server implementation that reproduces the small
+reference server described in the corpus README can replay the requests and
+diff the responses. Contributions of new cases are welcome.
+
 ## Examples
 
 The library includes several examples:

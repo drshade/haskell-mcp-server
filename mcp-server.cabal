@@ -15,7 +15,7 @@ name: mcp-server
 -- PVP summary:     +-+------- breaking API changes
 --                  | | +----- non-breaking API additions
 --                  | | | +--- code changes with no API change
-version: 0.2.0.0
+version: 0.2.1.0
 -- A short (one-line) description of the package.
 synopsis: Library for building Model Context Protocol (MCP) servers
 -- A longer description of the package.
@@ -53,6 +53,8 @@ tested-with: GHC == 9.6.7
 
 -- Extra source files to be distributed with the package, such as examples, or a tutorial module.
 extra-source-files:
+  test/golden/README.md
+  test/golden/manifest.json
   test/golden/legacy/*.json
   test/golden/modern/*.json
 -- Source repository information

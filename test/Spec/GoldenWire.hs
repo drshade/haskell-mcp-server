@@ -1,30 +1,37 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Golden wire-format fixtures: a canned request set is run through
--- 'handleMcpMessage' and each response is compared against a checked-in
--- fixture under @test/golden/@.
+-- | Golden wire-format conformance corpus: @test/golden/@ holds, per case,
+-- a JSON-RPC request (@\<name\>.request.json@) and the reference server's
+-- exact response (@\<name\>.response.json@), enumerated by
+-- @test/golden/manifest.json@. This spec replays every request through
+-- 'handleMcpMessage' and compares the response against the fixture.
 --
--- The legacy fixtures were generated from @main@ at v0.2.0 (commit
--- @7bd1bcc@), so they anchor the promise that dual-era support leaves
--- legacy responses unchanged. The modern fixtures pin the 2026-07-28
--- envelope introduced by this revision of the library.
+-- The corpus is deliberately API-agnostic — request and response are plain
+-- wire bytes, so any MCP implementation that reproduces the reference
+-- server described in @test/golden/README.md@ can consume it. Within this
+-- library it pins two promises: the legacy fixtures were generated from
+-- @main@ at v0.2.0 (commit @7bd1bcc@), anchoring "dual-era support leaves
+-- legacy responses unchanged", and the modern fixtures pin the 2026-07-28
+-- envelope.
 --
 -- Responses are compared as parsed 'Value's, not raw bytes: aeson's object
 -- key order depends on the aeson\/hashable versions in the build plan, which
 -- vary across the CI matrix, while 'Value' equality is stable and still
 -- catches every added, removed, renamed or changed field.
 --
--- To create a fixture for a new case, run the suite with @GOLDEN_ACCEPT=1@:
--- missing fixture files are then written from the current output. Existing
--- fixtures are never overwritten — delete one first to regenerate it, and
--- never regenerate the legacy fixtures from a branch that intends to keep
--- legacy output unchanged.
+-- To add a case: write the @.request.json@ by hand, add its manifest entry,
+-- and run the suite with @GOLDEN_ACCEPT=1@ — a missing response fixture is
+-- then written from the current output. Existing fixtures are never
+-- overwritten — delete one first to regenerate it, and never regenerate the
+-- legacy fixtures from a branch that intends to keep legacy output
+-- unchanged.
 module Spec.GoldenWire (spec) where
 
 import Control.Monad (forM_)
 import Data.Aeson
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Map as Map
+import Data.Text (Text)
 import qualified Data.Text as T
 import MCP.Server
 import MCP.Server.Handlers (handleMcpMessage)
@@ -41,7 +48,8 @@ goldenServerInfo = McpServerInfo
   }
 
 -- Deterministic manual handlers (no Template Haskell): one prompt, one
--- resource, one happy tool, one failing tool.
+-- resource, one happy tool, one failing tool. Documented for external
+-- consumers in test/golden/README.md — keep the two in sync.
 goldenHandlers :: McpServerHandlers
 goldenHandlers = noHandlers
   { prompts = Just (promptList, promptGet)
@@ -91,82 +99,64 @@ extendedHandlers = goldenHandlers
       completionResult (filter (T.isPrefixOf partial) ["alpha", "beta"])
   }
 
--- | (fixture path, raw request). The raw requests are written out verbatim
--- so the fixtures capture the full request->response wire behavior.
-cases :: [(FilePath, BSL.ByteString)]
-cases =
-  -- Legacy era: no _meta; served under the initialize-negotiated revision.
-  [ ("legacy/initialize",         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"golden-client\",\"version\":\"1.0\"}}}")
-  , ("legacy/ping",               "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}")
-  , ("legacy/tools-list",         "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/list\"}")
-  , ("legacy/tools-call-echo",    "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"echo\",\"arguments\":{\"text\":\"hi\"}}}")
-  , ("legacy/tools-call-unknown", "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"tools/call\",\"params\":{\"name\":\"nope\",\"arguments\":{}}}")
-  , ("legacy/tools-call-boom",    "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"tools/call\",\"params\":{\"name\":\"boom\",\"arguments\":{}}}")
-  , ("legacy/prompts-list",       "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"prompts/list\"}")
-  , ("legacy/prompts-get",        "{\"jsonrpc\":\"2.0\",\"id\":8,\"method\":\"prompts/get\",\"params\":{\"name\":\"greet\",\"arguments\":{\"name\":\"World\"}}}")
-  , ("legacy/resources-list",     "{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"resources/list\"}")
-  , ("legacy/resources-read",     "{\"jsonrpc\":\"2.0\",\"id\":10,\"method\":\"resources/read\",\"params\":{\"uri\":\"resource://info\"}}")
+-- | One manifest entry: which case, and which reference-server variant
+-- answers it.
+data GoldenCase = GoldenCase
+  { caseName          :: FilePath
+  , caseHandlers      :: Text  -- ^ "base" or "extended"
+  , caseNotifications :: Bool
+  }
 
-  -- Modern era: _meta declares 2026-07-28; responses carry the modern
-  -- envelope (resultType, serverInfo _meta, cacheability on list/read).
-  , ("modern/server-discover",     "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"server/discover\",\"params\":{" <> meta <> "}}")
-  , ("modern/tools-list",          "{\"jsonrpc\":\"2.0\",\"id\":22,\"method\":\"tools/list\",\"params\":{" <> meta <> "}}")
-  , ("modern/tools-call-echo",     "{\"jsonrpc\":\"2.0\",\"id\":23,\"method\":\"tools/call\",\"params\":{\"name\":\"echo\",\"arguments\":{\"text\":\"hi\"}," <> meta <> "}}")
-  , ("modern/prompts-get",         "{\"jsonrpc\":\"2.0\",\"id\":24,\"method\":\"prompts/get\",\"params\":{\"name\":\"greet\",\"arguments\":{\"name\":\"World\"}," <> meta <> "}}")
-  , ("modern/resources-read",      "{\"jsonrpc\":\"2.0\",\"id\":25,\"method\":\"resources/read\",\"params\":{\"uri\":\"resource://info\"," <> meta <> "}}")
-  , ("modern/unsupported-version", "{\"jsonrpc\":\"2.0\",\"id\":26,\"method\":\"tools/list\",\"params\":{\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2099-01-01\"}}}")
-  , ("modern/initialize",          "{\"jsonrpc\":\"2.0\",\"id\":27,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2026-07-28\",\"capabilities\":{},\"clientInfo\":{\"name\":\"golden-client\",\"version\":\"1.0\"}," <> meta <> "}}")
-  , ("modern/ping",                "{\"jsonrpc\":\"2.0\",\"id\":28,\"method\":\"ping\",\"params\":{" <> meta <> "}}")
-  ]
+instance FromJSON GoldenCase where
+  parseJSON = withObject "GoldenCase" $ \o -> GoldenCase
+    <$> o .: "name"
+    <*> o .: "handlers"
+    <*> o .: "notifications"
 
--- Methods introduced after v0.2.0: their fixtures originate on the branch
--- that added the method (there is no earlier behavior to anchor to).
-extendedCases :: [(FilePath, BSL.ByteString)]
-extendedCases =
-  [ ("legacy/resources-templates-list", "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"resources/templates/list\"}")
-  , ("legacy/completion-complete",      "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"completion/complete\",\"params\":{\"ref\":{\"type\":\"ref/prompt\",\"name\":\"greet\"},\"argument\":{\"name\":\"name\",\"value\":\"al\"}}}")
-  , ("modern/resources-templates-list", "{\"jsonrpc\":\"2.0\",\"id\":29,\"method\":\"resources/templates/list\",\"params\":{" <> meta <> "}}")
-  , ("modern/completion-complete",      "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"completion/complete\",\"params\":{\"ref\":{\"type\":\"ref/prompt\",\"name\":\"greet\"},\"argument\":{\"name\":\"name\",\"value\":\"al\"}," <> meta <> "}}")
-  ]
+newtype Manifest = Manifest [GoldenCase]
 
-meta :: BSL.ByteString
-meta = "\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientInfo\":{\"name\":\"golden-client\",\"version\":\"1.0\"},\"io.modelcontextprotocol/clientCapabilities\":{}}"
+instance FromJSON Manifest where
+  parseJSON = withObject "Manifest" $ \o -> Manifest <$> o .: "cases"
 
--- Capability fixtures for a transport that delivers notifications (stdio
--- with a configured source: legacy push + modern listen)
-notifyingCases :: [(FilePath, BSL.ByteString)]
-notifyingCases =
-  [ ("legacy/initialize-notifying", "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},\"clientInfo\":{\"name\":\"golden-client\",\"version\":\"1.0\"}}}")
-  , ("modern/server-discover-notifying", "{\"jsonrpc\":\"2.0\",\"id\":31,\"method\":\"server/discover\",\"params\":{" <> meta <> "}}")
-  ]
+-- | The corpus enumeration, read while hspec constructs the spec tree.
+loadManifest :: IO [GoldenCase]
+loadManifest = do
+  bytes <- BSL.readFile "test/golden/manifest.json"
+  case eitherDecode bytes of
+    Left err            -> fail ("test/golden/manifest.json does not parse: " ++ err)
+    Right (Manifest cs) -> pure cs
 
-runCase :: NotificationSupport -> McpServerHandlers -> BSL.ByteString -> IO Value
-runCase support handlers raw = do
+runCase :: GoldenCase -> BSL.ByteString -> IO Value
+runCase gc raw = do
   jsonValue <- either (fail . ("request does not parse: " ++)) pure (eitherDecode raw)
   message <- either (fail . ("request is not JSON-RPC: " ++)) pure (parseJsonRpcMessage jsonValue)
+  let handlers = if caseHandlers gc == "extended" then extendedHandlers else goldenHandlers
+      support = if caseNotifications gc
+        then NotificationSupport { supportsLegacyPush = True, supportsListen = True }
+        else noNotificationSupport
   maybeResponse <- handleMcpMessage goldenServerInfo defaultCacheHints support handlers anonymousContext message
   case maybeResponse of
     Just responseMsg -> pure $ encodeJsonRpcMessage responseMsg
     Nothing          -> fail "expected a response"
 
-goldenCase :: NotificationSupport -> McpServerHandlers -> (FilePath, BSL.ByteString) -> Spec
-goldenCase support handlers (name, raw) =
-  it name $ do
-    actual <- runCase support handlers raw
-    let path = "test/golden/" ++ name ++ ".json"
-    exists <- doesFileExist path
+goldenCase :: GoldenCase -> Spec
+goldenCase gc =
+  it (caseName gc) $ do
+    let requestPath = "test/golden/" ++ caseName gc ++ ".request.json"
+        responsePath = "test/golden/" ++ caseName gc ++ ".response.json"
+    raw <- BSL.readFile requestPath
+    actual <- runCase gc raw
+    exists <- doesFileExist responsePath
     accept <- lookupEnv "GOLDEN_ACCEPT"
     if not exists && accept /= Nothing
-      then BSL.writeFile path (encode actual)
+      then BSL.writeFile responsePath (encode actual)
       else do
-        fixtureBytes <- BSL.readFile path
+        fixtureBytes <- BSL.readFile responsePath
         case eitherDecode fixtureBytes :: Either String Value of
           Left err      -> expectationFailure $ "fixture does not parse: " ++ err
           Right fixture -> actual `shouldBe` fixture
 
 spec :: Spec
 spec = describe "Golden wire-format fixtures" $ do
-  forM_ cases (goldenCase noNotificationSupport goldenHandlers)
-  forM_ extendedCases (goldenCase noNotificationSupport extendedHandlers)
-  forM_ notifyingCases
-    (goldenCase (NotificationSupport { supportsLegacyPush = True, supportsListen = True }) goldenHandlers)
+  cases <- runIO loadManifest
+  forM_ cases goldenCase
