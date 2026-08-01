@@ -171,12 +171,9 @@ spec = describe "Unicode Handling" $ do
     it "handles complete Unicode workflow without Template Haskell" $ do
       -- Create manual handlers with Unicode content
       let promptListHandler = return [
-            PromptDefinition
-              { promptDefinitionName = "math_formula"
-              , promptDefinitionDescription = "Generate mathematical formulas with Unicode: ∀∃∈√"
-              , promptDefinitionArguments = [ArgumentDefinition "formula" "Mathematical expression" True]
-              , promptDefinitionTitle = Nothing  -- 2025-06-18: New title field
-              }
+            mkPromptDefinition "math_formula"
+              "Generate mathematical formulas with Unicode: ∀∃∈√"
+              [ArgumentDefinition "formula" "Mathematical expression" True]
             ]
 
       let promptGetHandler name args = case name of
@@ -186,12 +183,9 @@ spec = describe "Unicode Handling" $ do
             _ -> return $ Left $ InvalidPromptName name
 
       let resourceListHandler = return [
-            ResourceDefinition
-              { resourceDefinitionURI = "resource://unicode_symbols"
-              , resourceDefinitionName = "unicode_symbols"
-              , resourceDefinitionDescription = Just "Unicode mathematical symbols: ∀∃∈∉√∑"
+            (mkResourceDefinition "resource://unicode_symbols" "unicode_symbols")
+              { resourceDefinitionDescription = Just "Unicode mathematical symbols: ∀∃∈∉√∑"
               , resourceDefinitionMimeType = Just "text/plain"
-              , resourceDefinitionTitle = Nothing  -- 2025-06-18: New title field
               }
             ]
 
@@ -201,15 +195,10 @@ spec = describe "Unicode Handling" $ do
               else return $ Left $ ResourceNotFound $ T.pack $ show uri
 
       let toolListHandler = return [
-            ToolDefinition
-              { toolDefinitionName = "calculate"
-              , toolDefinitionDescription = "Calculate with Unicode symbols: √∑∏"
-              , toolDefinitionInputSchema = schema $ SchemaObject
+            mkToolDefinition "calculate" "Calculate with Unicode symbols: √∑∏"
+              (schema $ SchemaObject
                   [("expression", describedSchema "Mathematical expression" (SchemaString Nothing))]
-                  ["expression"]
-              , toolDefinitionOutputSchema = Nothing
-              , toolDefinitionTitle = Nothing  -- 2025-06-18: New title field
-              }
+                  ["expression"])
             ]
 
       let toolCallHandler name args = case name of

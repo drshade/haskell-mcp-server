@@ -60,8 +60,8 @@ goldenHandlers = noHandlers
   }
   where
     promptList _ = pure
-      [ PromptDefinition "greet" "Greet someone"
-          [ArgumentDefinition "name" "Who to greet" True] Nothing
+      [ mkPromptDefinition "greet" "Greet someone"
+          [ArgumentDefinition "name" "Who to greet" True]
       ]
     promptGet _ name args = case name of
       "greet" -> pure $ Right $ PromptResult (Just "A greeting")
@@ -69,16 +69,19 @@ goldenHandlers = noHandlers
       _ -> pure $ Left $ InvalidPromptName name
 
     resourceList _ = pure
-      [ ResourceDefinition "resource://info" "info" (Just "Some info") (Just "text/plain") Nothing ]
+      [ (mkResourceDefinition "resource://info" "info")
+          { resourceDefinitionDescription = Just "Some info"
+          , resourceDefinitionMimeType = Just "text/plain"
+          }
+      ]
     resourceRead _ uri
       | show uri == "resource://info" = pure $ Right $ ResourceText uri "text/plain" "The golden info"
       | otherwise = pure $ Left $ ResourceNotFound $ T.pack $ show uri
 
     toolList _ = pure
-      [ ToolDefinition "echo" "Echo the text"
+      [ mkToolDefinition "echo" "Echo the text"
           (Schema Nothing (SchemaObject
             [("text", Schema (Just "The text") (SchemaString Nothing))] ["text"]))
-          Nothing Nothing
       ]
     toolCall _ name args = case name of
       "echo" -> case Map.lookup "text" args of
@@ -88,13 +91,20 @@ goldenHandlers = noHandlers
       _      -> pure $ Left $ UnknownTool name
 
 -- The extended set's structured-output tool, derived so the corpus pins
--- exactly what the TH derivation puts on the wire (ADR 0005)
+-- exactly what the TH derivation puts on the wire (ADR 0005). The field
+-- selectors are intentionally unused: the generated serializer binds
+-- fields by pattern-matching.
 data GoldenEchoOutput = GoldenEchoOutput
   { echoedText   :: Text
   , echoedLength :: Int
   }
 
+
 data GoldenStructTool = EchoStructured { input :: Text }
+
+-- Selector uses, so -Wunused-top-binds stays quiet
+_selectors :: (GoldenEchoOutput -> Text, GoldenEchoOutput -> Int, GoldenStructTool -> Text)
+_selectors = (echoedText, echoedLength, input)
 
 goldenStructHandler :: ClientContext -> GoldenStructTool -> IO (ToolOutput GoldenEchoOutput)
 goldenStructHandler _ (EchoStructured t) =
@@ -119,8 +129,10 @@ structuredTools = $(deriveToolHandlerWithOutputDescription
 extendedHandlers :: McpServerHandlers
 extendedHandlers = goldenHandlers
   { resourceTemplates = Just $ \_ -> pure
-      [ ResourceTemplateDefinition "resource://item/{itemId}" "item"
-          (Just "An item") (Just "text/plain") Nothing
+      [ (mkResourceTemplateDefinition "resource://item/{itemId}" "item")
+          { resourceTemplateDescription = Just "An item"
+          , resourceTemplateMimeType = Just "text/plain"
+          }
       ]
   , completions = Just $ \_ _ref _arg partial _ctx -> pure $ Right $
       completionResult (filter (T.isPrefixOf partial) ["alpha", "beta"])
