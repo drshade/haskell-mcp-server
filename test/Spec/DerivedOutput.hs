@@ -75,6 +75,13 @@ spec = describe "Derived structured output" $ do
             other -> expectationFailure $ "expected one text block, got: " ++ show other
         Left err -> expectationFailure $ "expected result, got error: " ++ show err
 
+    it "renders the text block canonically (sorted keys, build-plan independent)" $ do
+      result <- callWeather "get_weather" [("wtCity", String "Cape Town")]
+      case result of
+        Right tr -> toolResultContent tr `shouldBe`
+          [ContentText "{\"wrAlerts\":[\"wind advisory for Cape Town\"],\"wrHumidity\":60,\"wrSky\":\"sky_cloudy\",\"wrTemperature\":21,\"wrWind\":{\"windGusting\":false,\"windSpeedKph\":12.5}}"]
+        Left err -> expectationFailure $ "expected result, got error: " ++ show err
+
     it "omits Nothing fields from the serialized value" $ do
       result <- callWeather "custom_report" [("wtRegion", String "Karoo")]
       case result of

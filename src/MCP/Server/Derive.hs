@@ -24,6 +24,7 @@ module MCP.Server.Derive
   , deriveToolHandlerWithOutputDescription
   ) where
 
+import           Control.Monad       (zipWithM)
 import           Data.Aeson          (Value (..))
 import           Data.List           (intercalate)
 import           Data.Maybe          (fromMaybe)
@@ -236,7 +237,7 @@ mkValueBuilder ty = case ty of
         vVar <- newName "v"
         matches <- mapM enumMatch cs
         return $ LamE [VarP vVar] $ CaseE (VarE vVar) matches
-      Just [RecC _ ifields] -> mkRecordBuilder ifields
+      Just [RecC icon ifields] -> mkRecordBuilder icon ifields
       Just [NormalC icon [(_bang, inner)]] -> do
         xVar <- newName "x"
         wrapped <- conP icon [varP xVar]
@@ -251,21 +252,24 @@ mkValueBuilder ty = case ty of
       pat <- conP cn []
       return $ Match pat (NormalB body) []
 
--- Serializer for a record: an object with one entry per field, in
--- declaration order, omitting 'Maybe' fields that are 'Nothing'.
-mkRecordBuilder :: [(Name, Bang, Type)] -> Q Exp
-mkRecordBuilder fields = do
-  rVar <- newName "r"
-  fieldExps <- mapM (fieldPairs rVar) fields
+-- Serializer for a record: an object with one entry per field, omitting
+-- 'Maybe' fields that are 'Nothing'. Fields are bound by pattern-matching
+-- the constructor — never by accessor application, which would be ambiguous
+-- for users with DuplicateRecordFields enabled.
+mkRecordBuilder :: Name -> [(Name, Bang, Type)] -> Q Exp
+mkRecordBuilder con fields = do
+  vars <- mapM (const $ newName "f") fields
+  pat <- conP con (map varP vars)
+  fieldExps <- zipWithM fieldPairs vars fields
   body <- [| object (concat $(return $ ListE fieldExps)) |]
-  return $ LamE [VarP rVar] body
+  return $ LamE [pat] body
   where
-    fieldPairs rVar (fieldName, _, fieldType) = do
+    fieldPairs var (fieldName, _, fieldType) = do
       let (isOptional, innerType) = unwrapMaybe fieldType
       let fname = litE $ stringL $ nameBase fieldName
       if isOptional
-        then [| omitNothing $fname $(mkValueBuilder innerType) ($(varE fieldName) $(varE rVar)) |]
-        else [| [ $fname .= $(mkValueBuilder innerType) ($(varE fieldName) $(varE rVar)) ] |]
+        then [| omitNothing $fname $(mkValueBuilder innerType) $(varE var) |]
+        else [| [ $fname .= $(mkValueBuilder innerType) $(varE var) ] |]
 
 -- The output type must (possibly through single-constructor wrappers)
 -- resolve to a record: outputSchema is an object schema per the spec.

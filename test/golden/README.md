@@ -10,7 +10,9 @@ Each case in this directory is a pair of files:
 reference-server variant answers it (`handlers`) and whether the serving
 transport can deliver change notifications (`notifications`). Responses are
 compared as **parsed JSON** (structural equality), not raw bytes, so object
-key order never matters.
+key order never matters — with one deliberate exception: JSON embedded
+*inside a string* (the structured-output text block) is compared as part of
+the string, so those bytes are canonical: compact, object keys sorted.
 
 The corpus is deliberately **API-agnostic**: nothing in it refers to this
 library's types or Haskell at all. Any MCP server implementation that

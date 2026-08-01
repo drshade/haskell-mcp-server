@@ -37,9 +37,10 @@ module MCP.Server.Derive.Internal
     -- * Structured output
   , resolveToolOutput
   , omitNothing
+  , canonicalJsonText
   ) where
 
-import           Data.Aeson           (Value (..), encode)
+import           Data.Aeson           (ToJSON (..), Value (..), encode)
 import qualified Data.Aeson.Key       as Key
 import qualified Data.Aeson.KeyMap    as KM
 import           Data.Aeson.Types     (Pair)
@@ -232,13 +233,31 @@ resolveToolOutput :: (o -> Value) -> ToolOutput o -> ToolResult
 resolveToolOutput serialize out = case out of
   ToolOutput o ->
     let v = serialize o
-    in (toolResult [ContentText (jsonText v)]) { toolResultStructured = Just v }
+    in (toolResult [ContentText (canonicalJsonText v)]) { toolResultStructured = Just v }
   ToolOutputWith content o ->
     (toolResult content) { toolResultStructured = Just (serialize o) }
   ToolOutputError msg -> toolError msg
   ToolOutputRaw result -> result
-  where
-    jsonText = TE.decodeUtf8 . BSL.toStrict . encode
+
+-- | Compact JSON with objects in sorted-key order, independent of the
+-- aeson\/hashable pair in the build plan. Used wherever JSON ends up
+-- /inside a string/ (the structured-output text block): structural
+-- comparison cannot see through a string, so those bytes must be
+-- deterministic — which also keeps repeated tool results stable for client
+-- prompt caching.
+canonicalJsonText :: Value -> Text
+canonicalJsonText = TE.decodeUtf8 . BSL.toStrict . encode . Canonical
+
+-- Encoding-only wrapper: objects are emitted via a sorted 'Map', arrays
+-- and atoms recurse. 'encode' uses 'toEncoding', so no KeyMap is rebuilt.
+newtype Canonical = Canonical Value
+
+instance ToJSON Canonical where
+  toJSON (Canonical v) = v
+  toEncoding (Canonical (Object o)) =
+    toEncoding (Map.fromList [(Key.toText k, Canonical v) | (k, v) <- KM.toList o])
+  toEncoding (Canonical (Array xs)) = toEncoding (fmap Canonical xs)
+  toEncoding (Canonical v) = toEncoding v
 
 -- | A record field for the generated serializers: absent when 'Nothing',
 -- mirroring how the generated schema marks 'Maybe' fields optional.
