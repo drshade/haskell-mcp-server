@@ -1,3 +1,5 @@
+> **ADR_0002 — Historical.** This document predates the ADR convention: it is preserved as-written (a working note from the time), renumbered for the index. New ADRs follow the format described in [README.md](README.md).
+
 # Support for better parameter types
 
 Currently, the mcp-server library supports defining Tools, Prompts and Resources like the following:
