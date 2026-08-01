@@ -129,10 +129,14 @@ sseHeaders =
 --
 -- A client closing the connection is its cancellation signal: for SSE
 -- responses the handler task is cancelled once the disconnect surfaces (at
--- most one keep-alive interval later), and for single-JSON responses Warp
--- tears the request thread down. Cancellation reaches handler code as an
--- asynchronous exception: handlers that acquire resources should release
--- them with 'Control.Exception.bracket'.
+-- most one keep-alive interval later — the periodic keep-alive write is
+-- what detects it). For single-JSON responses nothing is written until the
+-- handler finishes, so a disconnect is only detected — and the request
+-- thread only torn down — at the final write: mid-handler cancellation
+-- applies to streaming requests, and clients wanting cancellable calls
+-- should opt into streaming via a @progressToken@. Cancellation reaches
+-- handler code as an asynchronous exception: handlers that acquire
+-- resources should release them with 'Control.Exception.bracket'.
 transportRunHttp :: HttpConfig -> McpServerInfo -> McpServerHandlers -> IO ()
 transportRunHttp config serverInfo handlers = do
   let settings = Warp.setHost (fromString $ httpHost config) $

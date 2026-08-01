@@ -15,10 +15,15 @@ explicitly pinning the deprecated 0.2.0.0 should move here. The unreleased
   and `notifications/cancelled` cancels the referenced one (unknown or
   completed ids are ignored); on HTTP, closing an SSE response stream
   cancels the running handler (detected within one keep-alive interval,
-  now 5s), and Warp already tears down single-JSON request threads on
-  disconnect. Cancellation is delivered as an asynchronous exception, so
-  handlers acquiring resources should use `bracket` — documented in the
-  README. New dependency: `async`.
+  now 5s). Single-JSON HTTP responses only detect a disconnect at the
+  final write, so clients wanting cancellable calls should opt into
+  streaming via a `progressToken`. Cancellation is delivered as an
+  asynchronous exception, so handlers acquiring resources should use
+  `bracket` — documented in the README. BREAKING (behavioral): stdio
+  requests are now served concurrently rather than strictly
+  sequentially — handlers touching shared mutable state must
+  synchronize, as was already required with the HTTP transport. New
+  dependency: `async`.
 * Progress notifications and per-request SSE (ADR 0007): handlers can
   call `reportProgress` and `logToClient` on the `ClientContext` — both
   safe unconditionally. `reportProgress` emits `notifications/progress`

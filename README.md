@@ -353,8 +353,16 @@ work as soon as practical and sends nothing further for that request:
   are ignored, as required).
 - **HTTP**: closing the response stream is the cancellation signal. For SSE
   responses the handler is cancelled as soon as the disconnect is detected
-  (within one keep-alive interval); for single-JSON responses Warp tears the
-  request thread down on disconnect.
+  (within one keep-alive interval). For single-JSON responses a disconnect
+  is only detected at the final write — the handler runs to completion
+  first — so mid-handler cancellation applies to streaming requests:
+  clients wanting cancellable calls should opt into streaming via a
+  `progressToken`.
+
+A consequence of cancellable requests: **requests are now served
+concurrently on both transports** (stdio previously processed them strictly
+sequentially). Handlers touching shared mutable state must synchronize
+(`MVar`, `STM`, ...) — as was already required for HTTP servers.
 
 Cancellation is delivered to handler code as an asynchronous exception (the
 standard GHC mechanism, as used by `timeout` and `cancel`). Handlers are

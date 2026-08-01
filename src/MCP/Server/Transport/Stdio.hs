@@ -70,6 +70,11 @@ transportRunStdio = transportRunStdioWithConfig defaultStdioConfig
 -- written for that id). Cancellation reaches handler code as an
 -- asynchronous exception: handlers that acquire resources should release
 -- them with 'Control.Exception.bracket'.
+--
+-- This also means requests run /concurrently/ (before 0.2.0.1 the stdio
+-- transport processed them strictly sequentially): handlers touching
+-- shared mutable state must synchronize, as was already required of
+-- handlers used with the HTTP transport.
 transportRunStdioWithConfig :: StdioConfig -> McpServerInfo -> McpServerHandlers -> IO ()
 transportRunStdioWithConfig config serverInfo handlers = do
   -- Ensure UTF-8 encoding for all handles
