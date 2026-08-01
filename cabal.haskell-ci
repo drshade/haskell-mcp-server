@@ -1,0 +1,9 @@
+-- haskell-ci configuration.
+--
+-- The generated workflow is customized via the patch below (trigger
+-- restrictions: skip docs-only changes, no duplicate push+PR runs).
+-- `haskell-ci regenerate` re-applies it automatically; if the patch stops
+-- applying after a haskell-ci upgrade, refresh it by re-editing the `on:`
+-- block and re-running `git diff .github/workflows/haskell-ci.yml >
+-- .github/haskell-ci.patch` from a clean regeneration.
+github-patches: .github/haskell-ci.patch
