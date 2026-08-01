@@ -315,6 +315,32 @@ main = runMcpServerStdio serverInfo handlers
       }
 ```
 
+## Progress and Per-Request Logging
+
+Handlers can report progress on long-running work and send log messages to
+the calling client through actions on the `ClientContext`:
+
+```haskell
+handleTool ctx (ImportData file) = do
+    reportProgress ctx 0.0 (Just 1.0) (Just "starting import")
+    logToClient ctx LogInfo (String "opening file")
+    ...
+    reportProgress ctx 1.0 (Just 1.0) Nothing
+```
+
+Both are safe to call unconditionally:
+
+- `reportProgress` emits `notifications/progress` only when the request
+  carried a `progressToken` (progress values must increase call over call).
+- `logToClient` emits `notifications/message` only when the request declared
+  `io.modelcontextprotocol/logLevel` — the spec forbids it otherwise — and
+  drops messages below the declared level.
+
+Delivery is transport-appropriate: on stdio the notifications interleave
+before the response; on HTTP, a request that opted in is answered with an
+SSE response stream carrying the notifications followed by the final
+response (requests that didn't opt in keep the single-JSON response).
+
 ## Change Notifications
 
 Servers whose tool/prompt/resource lists change at runtime can push change

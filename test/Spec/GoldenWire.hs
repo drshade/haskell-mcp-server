@@ -209,7 +209,7 @@ runCase gc raw = do
       support = if caseNotifications gc
         then NotificationSupport { supportsLegacyPush = True, supportsListen = True }
         else noNotificationSupport
-  maybeResponse <- handleMcpMessage goldenServerInfo defaultCacheHints support handlers anonymousContext message
+  maybeResponse <- handleMcpMessage goldenServerInfo defaultCacheHints support (\_ -> pure ()) handlers anonymousContext message
   case maybeResponse of
     Just responseMsg -> pure $ encodeJsonRpcMessage responseMsg
     Nothing          -> fail "expected a response"

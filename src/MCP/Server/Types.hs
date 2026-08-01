@@ -16,6 +16,7 @@ module MCP.Server.Types
   , defaultToolAnnotations
   , Icon(..)
   , icon
+  , LogLevel(..)
 
     -- * Handler Result Types
   , ToolResult(..)
@@ -307,6 +308,39 @@ data Icon = Icon
 -- | An icon with just a source URI.
 icon :: Text -> Icon
 icon src = Icon { iconSrc = src, iconMimeType = Nothing, iconSizes = [] }
+
+-- | RFC 5424 log severities, least to most severe; the 'Ord' instance
+-- follows severity, so @level >= threshold@ is the filtering test.
+data LogLevel
+  = LogDebug
+  | LogInfo
+  | LogNotice
+  | LogWarning
+  | LogError
+  | LogCritical
+  | LogAlert
+  | LogEmergency
+  deriving (Show, Eq, Ord, Enum, Bounded, Generic)
+
+logLevelText :: LogLevel -> Text
+logLevelText l = case l of
+  LogDebug     -> "debug"
+  LogInfo      -> "info"
+  LogNotice    -> "notice"
+  LogWarning   -> "warning"
+  LogError     -> "error"
+  LogCritical  -> "critical"
+  LogAlert     -> "alert"
+  LogEmergency -> "emergency"
+
+instance ToJSON LogLevel where
+  toJSON = String . logLevelText
+
+instance FromJSON LogLevel where
+  parseJSON = withText "LogLevel" $ \t ->
+    case lookup t [(logLevelText l, l) | l <- [minBound .. maxBound]] of
+      Just l  -> pure l
+      Nothing -> fail $ "Unknown log level: " ++ T.unpack t
 
 instance ToJSON Icon where
   toJSON i = object $
@@ -785,7 +819,18 @@ data ClientContext = ClientContext
   , clientCapabilities :: Maybe Value
       -- ^ The client's declared capabilities from request @_meta@
       --   (modern clients).
-  } deriving (Show, Eq)
+  , reportProgress :: Double -> Maybe Double -> Maybe Text -> IO ()
+      -- ^ Report progress for this request: current progress (which must
+      --   increase with each call), an optional total, and an optional
+      --   human-readable message. A no-op when the request carried no
+      --   @progressToken@, so handlers can call it unconditionally. Stop
+      --   reporting once the handler returns; avoid flooding.
+  , logToClient :: LogLevel -> Value -> IO ()
+      -- ^ Send a log message to this request's client
+      --   (@notifications\/message@). A no-op unless the request declared
+      --   @io.modelcontextprotocol\/logLevel@ (the spec forbids emitting
+      --   otherwise); messages below the declared level are dropped.
+  }
 
 -- | A context carrying no transport- or request-level information: what
 -- handlers see for legacy stdio requests.
@@ -796,6 +841,8 @@ anonymousContext = ClientContext
   , clientProtocolVersion = Nothing
   , clientInfo = Nothing
   , clientCapabilities = Nothing
+  , reportProgress = \_ _ _ -> pure ()
+  , logToClient = \_ _ -> pure ()
   }
 
 -- | Cacheability hints stamped onto modern (2026-07-28+) list/read results,

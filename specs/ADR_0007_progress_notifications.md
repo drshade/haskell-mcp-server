@@ -1,6 +1,6 @@
 # ADR 0007: Progress notifications and per-request SSE
 
-- **Status**: Proposed
+- **Status**: Landed (0.2.0.1)
 - **Date**: 2026-08-01
 - **Depends on**: —
 

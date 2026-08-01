@@ -26,9 +26,7 @@ Both landed in the pending 0.2.0.1.
 
 ## Batch 2 — long-running tools
 
-3. [ADR_0007 — Progress notifications and per-request SSE](ADR_0007_progress_notifications.md).
-   The biggest behavioral gap vs the spec; also the structural change
-   (async, streaming HTTP responses) everything after it builds on.
+3. [ADR_0007 — Progress notifications and per-request SSE](ADR_0007_progress_notifications.md) — **Landed**.
 4. [ADR_0008 — Cancellation of in-flight requests](ADR_0008_request_cancellation.md).
    Only meaningful on top of ADR_0007's execution model — sequenced
    immediately after, possibly the same release.
