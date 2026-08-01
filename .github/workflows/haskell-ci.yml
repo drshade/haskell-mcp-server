@@ -30,6 +30,11 @@ on:
       - '.gitignore'
   merge_group:
   workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Supersede in-flight runs on new pushes to the same branch/PR, but let
+  # runs on main finish
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   linux:
     name: Haskell-CI - Linux - ${{ matrix.compiler }}

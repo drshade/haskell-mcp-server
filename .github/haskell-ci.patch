@@ -1,8 +1,8 @@
 diff --git a/.github/workflows/haskell-ci.yml b/.github/workflows/haskell-ci.yml
-index 49bdddd..9a988ba 100644
+index 49bdddd..53013c0 100644
 --- a/.github/workflows/haskell-ci.yml
 +++ b/.github/workflows/haskell-ci.yml
-@@ -14,10 +14,22 @@
+@@ -14,10 +14,27 @@
  #
  name: Haskell-CI
  on:
@@ -26,6 +26,11 @@ index 49bdddd..9a988ba 100644
 +      - '.gitignore'
 +  merge_group:
 +  workflow_dispatch:
++concurrency:
++  group: ${{ github.workflow }}-${{ github.ref }}
++  # Supersede in-flight runs on new pushes to the same branch/PR, but let
++  # runs on main finish
++  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
  jobs:
    linux:
      name: Haskell-CI - Linux - ${{ matrix.compiler }}
