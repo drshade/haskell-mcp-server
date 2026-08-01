@@ -6,6 +6,7 @@ module MCP.Server.Transport.Http
     HttpConfig(..)
   , transportRunHttp
   , defaultHttpConfig
+  , mcpApplication
 
     -- * Request validation (exposed for testing)
   , BodyPeek(..)
@@ -113,7 +114,17 @@ transportRunHttp config serverInfo handlers = do
   putStrLn $ "Starting MCP HTTP server on " ++ httpHost config ++ ":" ++ show (httpPort config) ++ httpEndpoint config
   Warp.runSettings settings (mcpApplication config serverInfo handlers)
 
--- | WAI Application for MCP over HTTP
+-- | The MCP endpoint as a plain WAI 'Wai.Application', for embedding into
+-- an existing WAI stack (your own Warp settings, TLS, middleware, or a
+-- larger router) instead of letting 'transportRunHttp' run its own server.
+--
+-- When embedding, 'httpPort' and 'httpHost' are ignored — they only
+-- configure the server 'transportRunHttp' starts. Everything else applies
+-- as usual: requests are served only on the 'httpEndpoint' path (any other
+-- path gets 404, so mount accordingly or match the path in your router),
+-- Origin validation and bearer authentication run per 'httpAllowedOrigins'
+-- and 'httpAuthorize', and @subscriptions\/listen@ streams work as long as
+-- the surrounding stack does not buffer streaming responses.
 mcpApplication :: HttpConfig -> McpServerInfo -> McpServerHandlers -> Wai.Application
 mcpApplication config serverInfo handlers req respond0 = do
   -- Log the request

@@ -1,5 +1,22 @@
 # Revision history for mcp-server
 
+## 0.2.1.0 - ???
+
+* The HTTP transport's WAI application is now exported (`mcpApplication`,
+  re-exported from `MCP.Server`), so the MCP endpoint can be embedded into
+  an existing WAI stack — your own Warp settings, TLS, middleware or router
+  — instead of `transportRunHttp` running its own server. `httpPort`/
+  `httpHost` are ignored when embedding; everything else (endpoint path,
+  Origin validation, bearer auth, `subscriptions/listen` streaming) applies
+  as usual.
+* The golden wire fixtures are now a self-describing, API-agnostic
+  conformance corpus: each case under `test/golden/` is a
+  `.request.json`/`.response.json` pair on disk, enumerated by
+  `manifest.json`, with the reference server documented in
+  `test/golden/README.md`. Other MCP implementations can replay the
+  requests and diff the responses without touching any Haskell; the
+  fixtures themselves are unchanged.
+
 ## 0.2.0.0 - 2026-07-31
 
 A major overhaul of the handler API. The headline changes: the handler

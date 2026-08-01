@@ -1,0 +1,126 @@
+{
+  "description": "Wire-level MCP conformance corpus: each case is a JSON-RPC request and the reference server's exact response, per protocol era. See README.md for the reference server definition.",
+  "comparison": "parsed-json-equality",
+  "cases": [
+    {
+      "name": "legacy/completion-complete",
+      "handlers": "extended",
+      "notifications": false
+    },
+    {
+      "name": "legacy/initialize",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "legacy/initialize-notifying",
+      "handlers": "base",
+      "notifications": true
+    },
+    {
+      "name": "legacy/ping",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "legacy/prompts-get",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "legacy/prompts-list",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "legacy/resources-list",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "legacy/resources-read",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "legacy/resources-templates-list",
+      "handlers": "extended",
+      "notifications": false
+    },
+    {
+      "name": "legacy/tools-call-boom",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "legacy/tools-call-echo",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "legacy/tools-call-unknown",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "legacy/tools-list",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "modern/completion-complete",
+      "handlers": "extended",
+      "notifications": false
+    },
+    {
+      "name": "modern/initialize",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "modern/ping",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "modern/prompts-get",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "modern/resources-read",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "modern/resources-templates-list",
+      "handlers": "extended",
+      "notifications": false
+    },
+    {
+      "name": "modern/server-discover",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "modern/server-discover-notifying",
+      "handlers": "base",
+      "notifications": true
+    },
+    {
+      "name": "modern/tools-call-echo",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "modern/tools-list",
+      "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "modern/unsupported-version",
+      "handlers": "base",
+      "notifications": false
+    }
+  ]
+}

@@ -13,6 +13,7 @@ module MCP.Server
   , defaultStdioConfig
   , HttpConfig(..)
   , defaultHttpConfig
+  , mcpApplication
 
     -- * Change Notifications
   , McpNotifier(..)
@@ -28,7 +29,8 @@ import           MCP.Server.Notifications (McpNotifier (..), NotificationSource,
 import           MCP.Server.Transport.Stdio (StdioConfig (..), defaultStdioConfig,
                                              transportRunStdio,
                                              transportRunStdioWithConfig)
-import           MCP.Server.Transport.Http (HttpConfig(..), transportRunHttp, defaultHttpConfig)
+import           MCP.Server.Transport.Http (HttpConfig(..), transportRunHttp, defaultHttpConfig,
+                                            mcpApplication)
 import           MCP.Server.Types
 
 -- | Run an MCP server using STDIO transport
