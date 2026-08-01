@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE DeriveLift        #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module MCP.Server.Types
@@ -7,6 +8,14 @@ module MCP.Server.Types
   , ContentImageData(..)
   , ContentAudioData(..)
   , ResourceContent(..)
+
+    -- * Metadata Types
+  , Annotations(..)
+  , defaultAnnotations
+  , ToolAnnotations(..)
+  , defaultToolAnnotations
+  , Icon(..)
+  , icon
 
     -- * Handler Result Types
   , ToolResult(..)
@@ -34,9 +43,13 @@ module MCP.Server.Types
 
     -- * Definition Types
   , PromptDefinition(..)
+  , mkPromptDefinition
   , ResourceDefinition(..)
+  , mkResourceDefinition
   , ResourceTemplateDefinition(..)
+  , mkResourceTemplateDefinition
   , ToolDefinition(..)
+  , mkToolDefinition
   , ArgumentDefinition(..)
 
     -- * Completion Types
@@ -87,6 +100,7 @@ import           Data.Maybe       (catMaybes, listToMaybe)
 import           Data.Text        (Text)
 import qualified Data.Text        as T
 import           GHC.Generics     (Generic)
+import           Language.Haskell.TH.Syntax (Lift)
 import           Network.URI      (URI, parseURI)
 
 type PromptName = Text
@@ -103,6 +117,9 @@ data Content
     -- ^ A resource embedded into the result, carrying its full contents
   | ContentResourceLink ResourceDefinition
     -- ^ A reference to a resource the client can read separately
+  | ContentAnnotated Annotations Content
+    -- ^ A content block carrying 'Annotations'; the annotations are merged
+    -- into the inner block's JSON object. Do not nest.
   deriving (Show, Eq, Generic)
 
 instance ToJSON Content where
@@ -128,23 +145,61 @@ instance ToJSON Content where
     case toJSON def of
       Object o -> Object (KM.insert "type" (String "resource_link") o)
       other    -> other
+  toJSON (ContentAnnotated anns inner) =
+    case toJSON inner of
+      Object o -> Object (KM.insert "annotations" (toJSON anns) o)
+      other    -> other
 
 instance FromJSON Content where
   parseJSON = withObject "Content" $ \o -> do
-    contentType <- o .: "type" :: Parser Text
-    case contentType of
-      "text" -> ContentText <$> o .: "text"
-      "image" -> do
-        imgData <- o .: "data"
-        mimeType <- o .: "mimeType"
-        return $ ContentImage $ ContentImageData imgData mimeType
-      "audio" -> do
-        audioData <- o .: "data"
-        mimeType <- o .: "mimeType"
-        return $ ContentAudio $ ContentAudioData audioData mimeType
-      "resource" -> ContentEmbeddedResource <$> o .: "resource"
-      "resource_link" -> ContentResourceLink <$> parseJSON (Object o)
-      _ -> fail $ "Unknown content type: " ++ T.unpack contentType
+    inner <- parseInner o
+    case KM.lookup "annotations" o of
+      Just anns -> ContentAnnotated <$> parseJSON anns <*> pure inner
+      Nothing   -> pure inner
+    where
+      parseInner o = do
+        contentType <- o .: "type" :: Parser Text
+        case contentType of
+          "text" -> ContentText <$> o .: "text"
+          "image" -> do
+            imgData <- o .: "data"
+            mimeType <- o .: "mimeType"
+            return $ ContentImage $ ContentImageData imgData mimeType
+          "audio" -> do
+            audioData <- o .: "data"
+            mimeType <- o .: "mimeType"
+            return $ ContentAudio $ ContentAudioData audioData mimeType
+          "resource" -> ContentEmbeddedResource <$> o .: "resource"
+          "resource_link" -> ContentResourceLink <$> parseJSON (Object o)
+          _ -> fail $ "Unknown content type: " ++ T.unpack contentType
+
+-- | Optional hints on content blocks: who the content is for, how important
+-- it is, and when it last changed (2025-03-26+).
+data Annotations = Annotations
+  { annotationsAudience     :: [MessageRole]  -- ^ Intended audience(s); omitted when empty
+  , annotationsPriority     :: Maybe Double   -- ^ 0.0 (optional) … 1.0 (most important)
+  , annotationsLastModified :: Maybe Text     -- ^ ISO 8601 timestamp
+  } deriving (Show, Eq, Generic)
+
+-- | No annotations set; record-update the ones you need.
+defaultAnnotations :: Annotations
+defaultAnnotations = Annotations
+  { annotationsAudience = []
+  , annotationsPriority = Nothing
+  , annotationsLastModified = Nothing
+  }
+
+instance ToJSON Annotations where
+  toJSON anns = object $
+    (if null (annotationsAudience anns) then [] else ["audience" .= annotationsAudience anns])
+    ++ maybe [] (\p -> ["priority" .= p]) (annotationsPriority anns)
+    ++ maybe [] (\lm -> ["lastModified" .= lm]) (annotationsLastModified anns)
+
+instance FromJSON Annotations where
+  parseJSON = withObject "Annotations" $ \o -> Annotations
+    <$> o .:? "audience" .!= []
+    <*> o .:? "priority"
+    <*> o .:? "lastModified"
 
 data ContentImageData = ContentImageData
   { contentImageData     :: Text  -- ^ base64-encoded image data
@@ -204,6 +259,66 @@ data MessageRole = RoleUser | RoleAssistant
 instance ToJSON MessageRole where
   toJSON RoleUser      = "user"
   toJSON RoleAssistant = "assistant"
+
+instance FromJSON MessageRole where
+  parseJSON = withText "MessageRole" $ \t -> case t of
+    "user"      -> pure RoleUser
+    "assistant" -> pure RoleAssistant
+    _           -> fail $ "Unknown role: " ++ T.unpack t
+
+-- | Behavioral hints on a tool (2025-03-26+): clients use these for
+-- permission UX (e.g. auto-approving read-only tools). All hints are
+-- advisory and default to unset.
+data ToolAnnotations = ToolAnnotations
+  { toolAnnotationsTitle      :: Maybe Text
+  , toolReadOnlyHint          :: Maybe Bool  -- ^ The tool does not modify its environment
+  , toolDestructiveHint       :: Maybe Bool  -- ^ The tool may perform destructive updates
+  , toolIdempotentHint        :: Maybe Bool  -- ^ Repeated calls with the same arguments have no additional effect
+  , toolOpenWorldHint         :: Maybe Bool  -- ^ The tool interacts with an open world of external entities
+  } deriving (Show, Eq, Generic, Lift)
+
+-- | No hints set; record-update the ones you need.
+defaultToolAnnotations :: ToolAnnotations
+defaultToolAnnotations = ToolAnnotations
+  { toolAnnotationsTitle = Nothing
+  , toolReadOnlyHint = Nothing
+  , toolDestructiveHint = Nothing
+  , toolIdempotentHint = Nothing
+  , toolOpenWorldHint = Nothing
+  }
+
+instance ToJSON ToolAnnotations where
+  toJSON anns = object $ concat
+    [ maybe [] (\t -> ["title" .= t]) (toolAnnotationsTitle anns)
+    , maybe [] (\b -> ["readOnlyHint" .= b]) (toolReadOnlyHint anns)
+    , maybe [] (\b -> ["destructiveHint" .= b]) (toolDestructiveHint anns)
+    , maybe [] (\b -> ["idempotentHint" .= b]) (toolIdempotentHint anns)
+    , maybe [] (\b -> ["openWorldHint" .= b]) (toolOpenWorldHint anns)
+    ]
+
+-- | An icon a client may display for a tool, prompt or resource
+-- (2025-11-25+).
+data Icon = Icon
+  { iconSrc      :: Text        -- ^ URI of the icon
+  , iconMimeType :: Maybe Text
+  , iconSizes    :: [Text]      -- ^ e.g. @[\"48x48\"]@; omitted when empty
+  } deriving (Show, Eq, Generic, Lift)
+
+-- | An icon with just a source URI.
+icon :: Text -> Icon
+icon src = Icon { iconSrc = src, iconMimeType = Nothing, iconSizes = [] }
+
+instance ToJSON Icon where
+  toJSON i = object $
+    [ "src" .= iconSrc i ]
+    ++ maybe [] (\m -> ["mimeType" .= m]) (iconMimeType i)
+    ++ (if null (iconSizes i) then [] else ["sizes" .= iconSizes i])
+
+instance FromJSON Icon where
+  parseJSON = withObject "Icon" $ \o -> Icon
+    <$> o .: "src"
+    <*> o .:? "mimeType"
+    <*> o .:? "sizes" .!= []
 
 -- | Prompt message
 data PromptMessage = PromptMessage
@@ -416,7 +531,20 @@ data PromptDefinition = PromptDefinition
   , promptDefinitionDescription :: Text
   , promptDefinitionArguments   :: [ArgumentDefinition]
   , promptDefinitionTitle       :: Maybe Text  -- New title field for human-friendly display
+  , promptDefinitionIcons       :: [Icon]      -- ^ omitted when empty (2025-11-25+)
   } deriving (Show, Eq, Generic)
+
+-- | A prompt definition with only the required fields set; record-update
+-- the optional ones (constructing 'PromptDefinition' directly breaks when
+-- fields are added).
+mkPromptDefinition :: Text -> Text -> [ArgumentDefinition] -> PromptDefinition
+mkPromptDefinition name description args = PromptDefinition
+  { promptDefinitionName = name
+  , promptDefinitionDescription = description
+  , promptDefinitionArguments = args
+  , promptDefinitionTitle = Nothing
+  , promptDefinitionIcons = []
+  }
 
 instance ToJSON PromptDefinition where
   toJSON def = object $
@@ -424,6 +552,7 @@ instance ToJSON PromptDefinition where
     , "description" .= promptDefinitionDescription def
     , "arguments" .= promptDefinitionArguments def
     ] ++ maybe [] (\t -> ["title" .= t]) (promptDefinitionTitle def)
+      ++ (if null (promptDefinitionIcons def) then [] else ["icons" .= promptDefinitionIcons def])
 
 -- | Resource definition (2025-06-18 enhanced)
 data ResourceDefinition = ResourceDefinition
@@ -432,7 +561,20 @@ data ResourceDefinition = ResourceDefinition
   , resourceDefinitionDescription :: Maybe Text
   , resourceDefinitionMimeType    :: Maybe Text
   , resourceDefinitionTitle       :: Maybe Text  -- New title field for human-friendly display
+  , resourceDefinitionIcons       :: [Icon]      -- ^ omitted when empty (2025-11-25+)
   } deriving (Show, Eq, Generic)
+
+-- | A resource definition with only the required fields set; record-update
+-- the optional ones.
+mkResourceDefinition :: Text -> Text -> ResourceDefinition
+mkResourceDefinition uri name = ResourceDefinition
+  { resourceDefinitionURI = uri
+  , resourceDefinitionName = name
+  , resourceDefinitionDescription = Nothing
+  , resourceDefinitionMimeType = Nothing
+  , resourceDefinitionTitle = Nothing
+  , resourceDefinitionIcons = []
+  }
 
 instance ToJSON ResourceDefinition where
   toJSON def = object $
@@ -441,7 +583,8 @@ instance ToJSON ResourceDefinition where
     ] ++
     maybe [] (\d -> ["description" .= d]) (resourceDefinitionDescription def) ++
     maybe [] (\m -> ["mimeType" .= m]) (resourceDefinitionMimeType def) ++
-    maybe [] (\t -> ["title" .= t]) (resourceDefinitionTitle def)
+    maybe [] (\t -> ["title" .= t]) (resourceDefinitionTitle def) ++
+    (if null (resourceDefinitionIcons def) then [] else ["icons" .= resourceDefinitionIcons def])
 
 instance FromJSON ResourceDefinition where
   parseJSON = withObject "ResourceDefinition" $ \o -> ResourceDefinition
@@ -450,6 +593,7 @@ instance FromJSON ResourceDefinition where
     <*> o .:? "description"
     <*> o .:? "mimeType"
     <*> o .:? "title"
+    <*> o .:? "icons" .!= []
 
 -- | Resource template definition: a parameterized resource identified by an
 -- RFC 6570 URI template.
@@ -459,7 +603,20 @@ data ResourceTemplateDefinition = ResourceTemplateDefinition
   , resourceTemplateDescription :: Maybe Text
   , resourceTemplateMimeType    :: Maybe Text
   , resourceTemplateTitle       :: Maybe Text
+  , resourceTemplateIcons       :: [Icon]  -- ^ omitted when empty (2025-11-25+)
   } deriving (Show, Eq, Generic)
+
+-- | A template definition with only the required fields set; record-update
+-- the optional ones.
+mkResourceTemplateDefinition :: Text -> Text -> ResourceTemplateDefinition
+mkResourceTemplateDefinition uriTemplate name = ResourceTemplateDefinition
+  { resourceTemplateURITemplate = uriTemplate
+  , resourceTemplateName = name
+  , resourceTemplateDescription = Nothing
+  , resourceTemplateMimeType = Nothing
+  , resourceTemplateTitle = Nothing
+  , resourceTemplateIcons = []
+  }
 
 instance ToJSON ResourceTemplateDefinition where
   toJSON def = object $
@@ -468,7 +625,8 @@ instance ToJSON ResourceTemplateDefinition where
     ] ++
     maybe [] (\d -> ["description" .= d]) (resourceTemplateDescription def) ++
     maybe [] (\m -> ["mimeType" .= m]) (resourceTemplateMimeType def) ++
-    maybe [] (\t -> ["title" .= t]) (resourceTemplateTitle def)
+    maybe [] (\t -> ["title" .= t]) (resourceTemplateTitle def) ++
+    (if null (resourceTemplateIcons def) then [] else ["icons" .= resourceTemplateIcons def])
 
 -- | What a completion request is completing an argument for.
 data CompletionRef
@@ -498,7 +656,22 @@ data ToolDefinition = ToolDefinition
   , toolDefinitionInputSchema  :: Schema
   , toolDefinitionOutputSchema :: Maybe Schema
   , toolDefinitionTitle        :: Maybe Text  -- New title field for human-friendly display
+  , toolDefinitionAnnotations  :: Maybe ToolAnnotations  -- ^ behavioral hints (2025-03-26+)
+  , toolDefinitionIcons        :: [Icon]                 -- ^ omitted when empty (2025-11-25+)
   } deriving (Show, Eq, Generic)
+
+-- | A tool definition with only the required fields set; record-update the
+-- optional ones.
+mkToolDefinition :: Text -> Text -> Schema -> ToolDefinition
+mkToolDefinition name description inputSchema = ToolDefinition
+  { toolDefinitionName = name
+  , toolDefinitionDescription = description
+  , toolDefinitionInputSchema = inputSchema
+  , toolDefinitionOutputSchema = Nothing
+  , toolDefinitionTitle = Nothing
+  , toolDefinitionAnnotations = Nothing
+  , toolDefinitionIcons = []
+  }
 
 instance ToJSON ToolDefinition where
   toJSON def = object $
@@ -507,6 +680,8 @@ instance ToJSON ToolDefinition where
     , "inputSchema" .= toolDefinitionInputSchema def
     ] ++ maybe [] (\s -> ["outputSchema" .= s]) (toolDefinitionOutputSchema def)
       ++ maybe [] (\t -> ["title" .= t]) (toolDefinitionTitle def)
+      ++ maybe [] (\a -> ["annotations" .= a]) (toolDefinitionAnnotations def)
+      ++ (if null (toolDefinitionIcons def) then [] else ["icons" .= toolDefinitionIcons def])
 
 -- | Argument definition for prompts
 data ArgumentDefinition = ArgumentDefinition

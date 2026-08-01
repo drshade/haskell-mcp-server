@@ -60,8 +60,8 @@ goldenHandlers = noHandlers
   }
   where
     promptList _ = pure
-      [ PromptDefinition "greet" "Greet someone"
-          [ArgumentDefinition "name" "Who to greet" True] Nothing
+      [ mkPromptDefinition "greet" "Greet someone"
+          [ArgumentDefinition "name" "Who to greet" True]
       ]
     promptGet _ name args = case name of
       "greet" -> pure $ Right $ PromptResult (Just "A greeting")
@@ -69,16 +69,19 @@ goldenHandlers = noHandlers
       _ -> pure $ Left $ InvalidPromptName name
 
     resourceList _ = pure
-      [ ResourceDefinition "resource://info" "info" (Just "Some info") (Just "text/plain") Nothing ]
+      [ (mkResourceDefinition "resource://info" "info")
+          { resourceDefinitionDescription = Just "Some info"
+          , resourceDefinitionMimeType = Just "text/plain"
+          }
+      ]
     resourceRead _ uri
       | show uri == "resource://info" = pure $ Right $ ResourceText uri "text/plain" "The golden info"
       | otherwise = pure $ Left $ ResourceNotFound $ T.pack $ show uri
 
     toolList _ = pure
-      [ ToolDefinition "echo" "Echo the text"
+      [ mkToolDefinition "echo" "Echo the text"
           (Schema Nothing (SchemaObject
             [("text", Schema (Just "The text") (SchemaString Nothing))] ["text"]))
-          Nothing Nothing
       ]
     toolCall _ name args = case name of
       "echo" -> case Map.lookup "text" args of
@@ -88,17 +91,35 @@ goldenHandlers = noHandlers
       _      -> pure $ Left $ UnknownTool name
 
 -- The extended set's structured-output tool, derived so the corpus pins
--- exactly what the TH derivation puts on the wire (ADR 0005)
+-- exactly what the TH derivation puts on the wire (ADR 0005). The field
+-- selectors are intentionally unused: the generated serializer binds
+-- fields by pattern-matching.
 data GoldenEchoOutput = GoldenEchoOutput
   { echoedText   :: Text
   , echoedLength :: Int
   }
 
+
 data GoldenStructTool = EchoStructured { input :: Text }
+
+-- Selector uses, so -Wunused-top-binds stays quiet
+_selectors :: (GoldenEchoOutput -> Text, GoldenEchoOutput -> Int, GoldenStructTool -> Text)
+_selectors = (echoedText, echoedLength, input)
 
 goldenStructHandler :: ClientContext -> GoldenStructTool -> IO (ToolOutput GoldenEchoOutput)
 goldenStructHandler _ (EchoStructured t) =
   pure $ ToolOutput (GoldenEchoOutput t (T.length t))
+
+-- The extended set's annotated tool (ADR 0006): read-only hints, icon and
+-- title on the definition; annotated content on the result
+data GoldenAnnotatedTool = AnnotatedProbe { probe :: Text }
+
+goldenAnnotatedHandler :: ClientContext -> GoldenAnnotatedTool -> IO ToolResult
+goldenAnnotatedHandler _ (AnnotatedProbe p) = pure $ toolResult
+  [ ContentAnnotated
+      defaultAnnotations { annotationsAudience = [RoleUser], annotationsPriority = Just 0.5 }
+      (ContentText ("probed: " <> p))
+  ]
 
 $(pure [])
 
@@ -111,6 +132,21 @@ structuredTools = $(deriveToolHandlerWithOutputDescription
   , ("echoedLength", "Its length")
   ])
 
+annotatedTools :: (ToolListHandler, ToolCallHandler)
+annotatedTools = $(deriveToolHandlerWithOptions
+  ''GoldenAnnotatedTool 'goldenAnnotatedHandler
+  [ ("AnnotatedProbe", defaultDefinitionOptions
+      { optDescription = Just "A read-only probe"
+      , optTitle = Just "Probe"
+      , optIcons = [icon "https://example.com/probe.png"]
+      , optToolAnnotations = Just defaultToolAnnotations
+          { toolReadOnlyHint = Just True
+          , toolIdempotentHint = Just True
+          }
+      , optFieldDescriptions = [("probe", "What to probe")]
+      })
+  ])
+
 -- | 'goldenHandlers' extended with the handler slots and tools introduced
 -- after v0.2.0. Used only for the fixtures of methods/behaviors that
 -- postdate the legacy anchor: extending the main handler set would change
@@ -119,16 +155,22 @@ structuredTools = $(deriveToolHandlerWithOutputDescription
 extendedHandlers :: McpServerHandlers
 extendedHandlers = goldenHandlers
   { resourceTemplates = Just $ \_ -> pure
-      [ ResourceTemplateDefinition "resource://item/{itemId}" "item"
-          (Just "An item") (Just "text/plain") Nothing
+      [ (mkResourceTemplateDefinition "resource://item/{itemId}" "item")
+          { resourceTemplateDescription = Just "An item"
+          , resourceTemplateMimeType = Just "text/plain"
+          }
       ]
   , completions = Just $ \_ _ref _arg partial _ctx -> pure $ Right $
       completionResult (filter (T.isPrefixOf partial) ["alpha", "beta"])
   , tools = do
       (baseList, baseCall) <- tools goldenHandlers
       let (sList, sCall) = structuredTools
-      pure ( \c -> (++) <$> baseList c <*> sList c
-           , \c n a -> if n == "echo_structured" then sCall c n a else baseCall c n a
+          (aList, aCall) = annotatedTools
+      pure ( \c -> concat <$> sequence [baseList c, sList c, aList c]
+           , \c n a -> case n of
+               "echo_structured" -> sCall c n a
+               "annotated_probe" -> aCall c n a
+               _                 -> baseCall c n a
            )
   }
 

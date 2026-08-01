@@ -244,6 +244,33 @@ data SimpleTool
 
 All parameter types must ultimately resolve to records with named fields to generate proper MCP schemas.
 
+#### Tool Annotations, Icons and Titles
+
+The `WithOptions` derivation variants take per-constructor
+`DefinitionOptions` — description, title, icons, behavioral annotations
+(which drive client permission UX, e.g. auto-approving read-only tools),
+and argument descriptions scoped to the constructor:
+
+```haskell
+tools = Just $(deriveToolHandlerWithOptions ''MyTool 'handleTool
+  [ ("Search", defaultDefinitionOptions
+      { optDescription = Just "Search the catalog"
+      , optToolAnnotations = Just defaultToolAnnotations
+          { toolReadOnlyHint = Just True, toolIdempotentHint = Just True }
+      , optIcons = [icon "https://example.com/search.png"]
+      , optFieldDescriptions = [("q", "Search terms")]
+      })
+  ])
+```
+
+Content blocks can carry annotations too (`audience`, `priority`,
+`lastModified`), attached with the `ContentAnnotated` wrapper:
+
+```haskell
+ContentAnnotated defaultAnnotations { annotationsPriority = Just 0.9 }
+                 (ContentText "important result")
+```
+
 ## Custom Descriptions
 
 You can provide custom descriptions for constructors and fields using the `*WithDescription` variants:

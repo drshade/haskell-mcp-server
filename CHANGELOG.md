@@ -1,6 +1,38 @@
 # Revision history for mcp-server
 
-## 0.2.1.0 - ???
+## 0.2.0.1 - ???
+
+(Supersedes 0.2.0.0, which is **deprecated on Hackage**: it was published
+hours before this line landed and was never adopted, so rather than
+burning a major version on a release nobody used, 0.2.0.1 replaces it —
+including changes that would ordinarily demand a major bump. Anyone
+explicitly pinning the deprecated 0.2.0.0 should move here. The unreleased
+0.2.1.0 line below is folded in as well.)
+
+* Definition metadata (ADR 0006):
+    * `ToolAnnotations` — `readOnlyHint`/`destructiveHint`/`idempotentHint`/
+      `openWorldHint` behavioral hints (2025-03-26+) plus a title, all unset
+      by default (`defaultToolAnnotations`), carried on `ToolDefinition` and
+      driving client permission UX.
+    * `Icon` lists (2025-11-25+) on tool, prompt, resource and
+      resource-template definitions.
+    * Content `Annotations` (`audience`/`priority`/`lastModified`,
+      2025-03-26+) attached via the new `ContentAnnotated` wrapper, whose
+      annotations merge into the inner block's JSON (and parse back out).
+* New `WithOptions` derivations for all five derive families, taking
+  per-constructor `DefinitionOptions` (description, title, icons, tool
+  annotations, and **constructor-scoped field descriptions** — two
+  constructors can now describe a same-named field differently, fixing the
+  global-namespace wart of the flat description list, which remains
+  supported unchanged).
+* BREAKING: `ToolDefinition`, `PromptDefinition`, `ResourceDefinition` and
+  `ResourceTemplateDefinition` gain fields, and `Content` gains the
+  `ContentAnnotated` constructor. New smart constructors
+  (`mkToolDefinition`, `mkPromptDefinition`, `mkResourceDefinition`,
+  `mkResourceTemplateDefinition`) build definitions from required fields
+  only — construct through them and record-update, so future optional
+  fields stop breaking your code. All new JSON fields are omitted when
+  unset, so wire output for existing servers is unchanged.
 
 * Derived output schemas and structured content (ADR 0005): the new
   `deriveToolHandlerWithOutput` (and `...WithOutputDescription`) take a

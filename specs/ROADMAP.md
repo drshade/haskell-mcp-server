@@ -8,19 +8,21 @@ value, not commitment.
 **Current state**: 0.2.0.0 is on Hackage (typed core, dual-era protocol
 support for 2024-11-05…2025-11-25 via `initialize` and stateless
 2026-07-28, resource templates, completions, change notifications with
-`subscriptions/listen`). 0.2.1.0 sits merged-but-unreleased (WAI
-application export, conformance corpus), soaking until enough accumulates.
+`subscriptions/listen`) but is deprecated there in favor of the pending
+line: 0.2.0.1 sits merged-but-unreleased (WAI application export,
+conformance corpus, and Batch 1: derived output schemas, definition
+metadata), soaking until released. 0.2.0.1 knowingly supersedes the
+never-adopted 0.2.0.0 in place rather than burning a major version.
 
-## Batch 1 — complete the typed core *(candidates to join the pending release)*
+## Batch 1 — complete the typed core *(landed)*
 
-Both are additive (PVP minor) and could ship with 0.2.1.x.
+Both landed in the pending 0.2.0.1.
 
-1. [ADR_0005 — Derived output schemas and structured content](ADR_0005_derived_output_schemas.md).
-   The highest-leverage item: finishes the library's thesis (typed in,
-   typed out) and is a genuine differentiator.
-2. [ADR_0006 — Tool annotations, icons, content annotations](ADR_0006_definition_metadata.md).
-   Cheap metadata that materially improves how clients treat our servers
-   (read-only/destructive hints drive permission UX).
+1. [ADR_0005 — Derived output schemas and structured content](ADR_0005_derived_output_schemas.md) — **Landed**.
+2. [ADR_0006 — Tool annotations, icons, content annotations](ADR_0006_definition_metadata.md) — **Landed**
+   (the definition-datatype extensions are breaking; they ship anyway in
+   0.2.0.1 because the only affected release, 0.2.0.0, is deprecated with
+   zero adopters).
 
 ## Batch 2 — long-running tools
 

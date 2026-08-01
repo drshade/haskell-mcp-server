@@ -48,6 +48,11 @@
       "notifications": false
     },
     {
+      "name": "legacy/tools-call-annotated",
+      "handlers": "extended",
+      "notifications": false
+    },
+    {
       "name": "legacy/tools-call-boom",
       "handlers": "base",
       "notifications": false
@@ -116,6 +121,11 @@
       "name": "modern/server-discover-notifying",
       "handlers": "base",
       "notifications": true
+    },
+    {
+      "name": "modern/tools-call-annotated",
+      "handlers": "extended",
+      "notifications": false
     },
     {
       "name": "modern/tools-call-echo",

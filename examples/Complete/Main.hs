@@ -69,7 +69,21 @@ main = do
     let prompts = $(derivePromptHandler ''MyPrompt 'handlePrompt)
         resources = $(deriveResourceHandler ''MyResource 'handleResource)
         templates = $(deriveResourceTemplates ''MyResource)
-        tools = $(deriveToolHandler ''MyTool 'handleTool)
+        -- Per-constructor options: descriptions, behavioral hints for
+        -- client permission UX, icons, and constructor-scoped argument
+        -- descriptions
+        tools = $(deriveToolHandlerWithOptions ''MyTool 'handleTool
+          [ ("SearchForProduct", defaultDefinitionOptions
+              { optDescription = Just "Search the product catalog"
+              , optToolAnnotations = Just defaultToolAnnotations
+                  { toolReadOnlyHint = Just True, toolIdempotentHint = Just True }
+              , optFieldDescriptions = [("q", "Search terms"), ("category", "Restrict to a category")]
+              })
+          , ("Checkout", defaultDefinitionOptions
+              { optToolAnnotations = Just defaultToolAnnotations
+                  { toolDestructiveHint = Just True }
+              })
+          ])
      in runMcpServerStdio
         McpServerInfo
             { serverName = "Complete Example MCP Server"

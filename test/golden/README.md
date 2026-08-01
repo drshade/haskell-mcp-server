@@ -54,6 +54,7 @@ v0.2.0 anchor, so the anchored capability fixtures stay untouched):
 | Resource template `resource://item/{itemId}` | name `item`, description `An item`, `text/plain` | — |
 | Completions | any ref/argument | values = `["alpha", "beta"]` filtered by prefix of the partial value |
 | Tool `echo_structured` | input schema: object, required `input` (string, "The text"); output schema: object, required `echoedText` (string, "The echoed text") and `echoedLength` (integer, "Its length"); description `Echo with structured output` | returns `structuredContent` `{"echoedText": <input>, "echoedLength": <length>}` plus one text content block containing the same JSON |
+| Tool `annotated_probe` | input schema: object, required `probe` (string, "What to probe"); description `A read-only probe`; title `Probe`; annotations `readOnlyHint`/`idempotentHint` true; one icon `https://example.com/probe.png` | returns one text block `probed: <probe>` annotated with audience `["user"]`, priority `0.5` |
 
 Cases with `"notifications": true` are answered as if the transport can
 deliver change notifications (stdio with a configured notifier: legacy push

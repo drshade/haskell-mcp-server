@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveLift        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell   #-}
 
@@ -14,26 +15,83 @@ module MCP.Server.Derive
   ( -- * Template Haskell Derivation
     derivePromptHandler
   , derivePromptHandlerWithDescription
+  , derivePromptHandlerWithOptions
   , deriveResourceHandler
   , deriveResourceHandlerWithDescription
+  , deriveResourceHandlerWithOptions
   , deriveResourceTemplates
   , deriveResourceTemplatesWithDescription
+  , deriveResourceTemplatesWithOptions
   , deriveToolHandler
   , deriveToolHandlerWithDescription
+  , deriveToolHandlerWithOptions
   , deriveToolHandlerWithOutput
   , deriveToolHandlerWithOutputDescription
+  , deriveToolHandlerWithOutputOptions
+
+    -- * Per-constructor customization
+  , DefinitionOptions(..)
+  , defaultDefinitionOptions
   ) where
 
 import           Control.Monad       (zipWithM)
 import           Data.Aeson          (Value (..))
 import           Data.List           (intercalate)
 import           Data.Maybe          (fromMaybe)
+import           Data.Text           (Text)
 import qualified Data.Text           as T
 import           Language.Haskell.TH
+import           Language.Haskell.TH.Syntax (Lift, lift)
 import qualified Data.Char           as Char
 
 import           MCP.Server.Derive.Internal
 import           MCP.Server.Types
+
+-- | Per-constructor customization for the @WithOptions@ derivations: a
+-- single mechanism for everything a definition can carry beyond its shape.
+-- Entries are looked up by constructor name; for output-typed tool
+-- derivations, an entry keyed by the /output type's/ name supplies its
+-- field descriptions.
+data DefinitionOptions = DefinitionOptions
+  { optDescription       :: Maybe Text
+    -- ^ The definition's description (falls back to the constructor name)
+  , optTitle             :: Maybe Text
+  , optIcons             :: [Icon]
+  , optToolAnnotations   :: Maybe ToolAnnotations
+    -- ^ Behavioral hints; meaningful for tools, ignored elsewhere
+  , optFieldDescriptions :: [(Text, Text)]
+    -- ^ Field\/argument descriptions, scoped to this constructor — two
+    -- constructors may describe a same-named field differently
+  } deriving (Show, Eq, Lift)
+
+-- | Nothing customized; record-update what you need.
+defaultDefinitionOptions :: DefinitionOptions
+defaultDefinitionOptions = DefinitionOptions
+  { optDescription = Nothing
+  , optTitle = Nothing
+  , optIcons = []
+  , optToolAnnotations = Nothing
+  , optFieldDescriptions = []
+  }
+
+-- | Look up a constructor's options.
+optionsFor :: [(String, DefinitionOptions)] -> String -> DefinitionOptions
+optionsFor opts name = fromMaybe defaultDefinitionOptions (lookup name opts)
+
+-- | Adapt the legacy flat description list to per-constructor options:
+-- constructor entries become 'optDescription'; the whole list also serves
+-- as the (unscoped) field-description namespace, preserving the old
+-- behavior exactly.
+optionsFromDescriptions :: [(String, String)] -> String -> DefinitionOptions
+optionsFromDescriptions descriptions name = defaultDefinitionOptions
+  { optDescription = T.pack <$> lookup name descriptions
+  }
+
+-- The merged field-description namespace for one constructor: its scoped
+-- entries shadow the legacy global list.
+fieldDescsFor :: DefinitionOptions -> [(String, String)] -> [(String, String)]
+fieldDescsFor opts globalDescs =
+  [(T.unpack k, T.unpack v) | (k, v) <- optFieldDescriptions opts] ++ globalDescs
 
 -------------------------------------------------------------------------------
 -- Small helpers
@@ -143,8 +201,8 @@ mkValueParser ty = case ty of
     cons <- reifyCons n
     case cons of
       Just cs | not (null cs), all isNullary cs -> mkEnumValueParser n cs
-      Just [RecC icon ifields] -> mkObjectParser n icon ifields
-      Just [NormalC icon [(_bang, inner)]] -> [| fmap $(conE icon) . $(mkValueParser inner) |]
+      Just [RecC icn ifields] -> mkObjectParser n icn ifields
+      Just [NormalC icn [(_bang, inner)]] -> [| fmap $(conE icn) . $(mkValueParser inner) |]
       _ -> fail $ "Unsupported tool argument type: " ++ show n
   _ -> fail $ "Unsupported tool argument type: " ++ show ty
 
@@ -175,11 +233,11 @@ mkEnumTextParser tyName cons = do
 
 -- Parser for a nested record: a JSON object decoded field by field
 mkObjectParser :: Name -> Name -> [(Name, Bang, Type)] -> Q Exp
-mkObjectParser tyName icon ifields = do
+mkObjectParser tyName icn ifields = do
   vVar <- newName "v"
   oVar <- newName "o"
   chain <- foldl (\acc f -> [| $acc <*> $(fieldExtractor oVar f) |])
-                 [| pure $(conE icon) |]
+                 [| pure $(conE icn) |]
                  ifields
   fallback <- [| Left ("Failed to parse " <> $(litE $ stringL $ nameBase tyName)
                        <> " object from: " <> renderValue $(varE vVar)) |]
@@ -237,10 +295,10 @@ mkValueBuilder ty = case ty of
         vVar <- newName "v"
         matches <- mapM enumMatch cs
         return $ LamE [VarP vVar] $ CaseE (VarE vVar) matches
-      Just [RecC icon ifields] -> mkRecordBuilder icon ifields
-      Just [NormalC icon [(_bang, inner)]] -> do
+      Just [RecC icn ifields] -> mkRecordBuilder icn ifields
+      Just [NormalC icn [(_bang, inner)]] -> do
         xVar <- newName "x"
-        wrapped <- conP icon [varP xVar]
+        wrapped <- conP icn [varP xVar]
         body <- [| $(mkValueBuilder inner) $(varE xVar) |]
         return $ LamE [wrapped] body
       _ -> fail $ "Unsupported output field type: " ++ show n
@@ -300,11 +358,11 @@ mkConDecoder style (NormalC cn [(_bang, paramType)]) =
       ConT typeName -> do
         cons <- reifyCons typeName
         case cons of
-          Just [RecC icon ifields] -> do
-            inner <- mkFieldsDecoder style (conE icon) ifields
+          Just [RecC icn ifields] -> do
+            inner <- mkFieldsDecoder style (conE icn) ifields
             [| $(conE cn) <$> $(return inner) |]
-          Just [NormalC icon [(_b, innerTy)]] -> do
-            innerCon <- mkConDecoder style (NormalC icon [(_b, innerTy)])
+          Just [NormalC icn [(_b, innerTy)]] -> do
+            innerCon <- mkConDecoder style (NormalC icn [(_b, innerTy)])
             [| $(conE cn) <$> $(return innerCon) |]
           _ -> fail $ "Parameter type " ++ show typeName ++ " must be a record type or single-parameter constructor"
       _ -> fail $ "Parameter type must be a concrete type, got: " ++ show ty
@@ -376,12 +434,25 @@ mkObjectShape descriptions fields = do
 --
 -- > $(derivePromptHandlerWithDescription ''MyPrompt 'handlePrompt [("Constructor", "Description")])
 derivePromptHandlerWithDescription :: Name -> Name -> [(String, String)] -> Q Exp
-derivePromptHandlerWithDescription typeName handlerName descriptions = do
+derivePromptHandlerWithDescription typeName handlerName descriptions =
+  derivePromptHandlerGeneric typeName handlerName (optionsFromDescriptions descriptions) descriptions
+
+-- | Derive prompt handlers with per-constructor 'DefinitionOptions'
+-- (title, icons, scoped argument descriptions). Usage:
+--
+-- > $(derivePromptHandlerWithOptions ''MyPrompt 'handlePrompt
+-- >     [("Recipe", defaultDefinitionOptions { optDescription = Just "…" })])
+derivePromptHandlerWithOptions :: Name -> Name -> [(String, DefinitionOptions)] -> Q Exp
+derivePromptHandlerWithOptions typeName handlerName opts =
+  derivePromptHandlerGeneric typeName handlerName (optionsFor opts) []
+
+derivePromptHandlerGeneric :: Name -> Name -> (String -> DefinitionOptions) -> [(String, String)] -> Q Exp
+derivePromptHandlerGeneric typeName handlerName conOpts globalDescs = do
   cons <- reifyCons typeName
   case cons of
     Just constructors -> do
       -- Generate prompt definitions
-      promptDefs <- traverse (mkPromptDefWithDescription descriptions) constructors
+      promptDefs <- traverse (mkPromptDef conOpts globalDescs) constructors
 
       -- Generate list handler
       listHandlerExp <- [| \_ctx -> pure $(return $ ListE promptDefs) |]
@@ -395,7 +466,7 @@ derivePromptHandlerWithDescription typeName handlerName descriptions = do
               (map clauseToMatch cases ++ [defaultMatch])
 
       return $ TupE [Just listHandlerExp, Just getHandlerExp]
-    Nothing -> fail $ "derivePromptHandlerWithDescription: " ++ show typeName ++ " is not a data type"
+    Nothing -> fail $ "derivePromptHandler: " ++ show typeName ++ " is not a data type"
 
 -- | Derive prompt handlers from a data type.
 -- Usage:
@@ -405,18 +476,20 @@ derivePromptHandler :: Name -> Name -> Q Exp
 derivePromptHandler typeName handlerName =
   derivePromptHandlerWithDescription typeName handlerName []
 
-mkPromptDefWithDescription :: [(String, String)] -> Con -> Q Exp
-mkPromptDefWithDescription descriptions con = do
+mkPromptDef :: (String -> DefinitionOptions) -> [(String, String)] -> Con -> Q Exp
+mkPromptDef conOpts globalDescs con = do
   let name = conName con
   let sname = snakeName name
-  let description = descriptionFor descriptions (nameBase name) ("Handle " ++ nameBase name)
+  let opts = conOpts (nameBase name)
+  let description = fromMaybe (T.pack ("Handle " ++ nameBase name)) (optDescription opts)
   fields <- getConFields con
-  args <- traverse (mkArgDef descriptions) fields
+  args <- traverse (mkArgDef (fieldDescsFor opts globalDescs)) fields
   [| PromptDefinition
       { promptDefinitionName = $(litE $ stringL sname)
-      , promptDefinitionDescription = $(litE $ stringL description)
+      , promptDefinitionDescription = $(lift description)
       , promptDefinitionArguments = $(return $ ListE args)
-      , promptDefinitionTitle = Nothing
+      , promptDefinitionTitle = $(lift (optTitle opts))
+      , promptDefinitionIcons = $(lift (optIcons opts))
       } |]
 
 mkArgDef :: [(String, String)] -> (Name, Bang, Type) -> Q Exp
@@ -477,12 +550,22 @@ mkDispatchCase style handlerName con = do
 --
 -- > $(deriveResourceHandlerWithDescription ''MyResource 'handleResource [("Constructor", "Description")])
 deriveResourceHandlerWithDescription :: Name -> Name -> [(String, String)] -> Q Exp
-deriveResourceHandlerWithDescription typeName handlerName descriptions = do
+deriveResourceHandlerWithDescription typeName handlerName descriptions =
+  deriveResourceHandlerGeneric typeName handlerName (optionsFromDescriptions descriptions)
+
+-- | Derive resource handlers with per-constructor 'DefinitionOptions'
+-- (description, title, icons).
+deriveResourceHandlerWithOptions :: Name -> Name -> [(String, DefinitionOptions)] -> Q Exp
+deriveResourceHandlerWithOptions typeName handlerName opts =
+  deriveResourceHandlerGeneric typeName handlerName (optionsFor opts)
+
+deriveResourceHandlerGeneric :: Name -> Name -> (String -> DefinitionOptions) -> Q Exp
+deriveResourceHandlerGeneric typeName handlerName conOpts = do
   cons <- reifyCons typeName
   case cons of
     Just constructors -> do
       -- Static resource definitions: nullary constructors only
-      resourceDefs <- traverse (mkResourceDefWithDescription descriptions)
+      resourceDefs <- traverse (mkResourceDef conOpts)
                                (filter isNullary constructors)
       listHandlerExp <- [| \_ctx -> pure $(return $ ListE resourceDefs) |]
 
@@ -494,7 +577,7 @@ deriveResourceHandlerWithDescription typeName handlerName descriptions = do
       let readHandlerExp = LamE [VarP ctxName, VarP uriName] readBody
 
       return $ TupE [Just listHandlerExp, Just readHandlerExp]
-    Nothing -> fail $ "deriveResourceHandlerWithDescription: " ++ show typeName ++ " is not a data type"
+    Nothing -> fail $ "deriveResourceHandler: " ++ show typeName ++ " is not a data type"
 
 -- | Derive resource handlers from a data type.
 -- Usage:
@@ -510,14 +593,24 @@ deriveResourceHandler typeName handlerName =
 --
 -- > $(deriveResourceTemplatesWithDescription ''MyResource [("Constructor", "Description")])
 deriveResourceTemplatesWithDescription :: Name -> [(String, String)] -> Q Exp
-deriveResourceTemplatesWithDescription typeName descriptions = do
+deriveResourceTemplatesWithDescription typeName descriptions =
+  deriveResourceTemplatesGeneric typeName (optionsFromDescriptions descriptions)
+
+-- | Derive a 'ResourceTemplateListHandler' with per-constructor
+-- 'DefinitionOptions' (description, title, icons).
+deriveResourceTemplatesWithOptions :: Name -> [(String, DefinitionOptions)] -> Q Exp
+deriveResourceTemplatesWithOptions typeName opts =
+  deriveResourceTemplatesGeneric typeName (optionsFor opts)
+
+deriveResourceTemplatesGeneric :: Name -> (String -> DefinitionOptions) -> Q Exp
+deriveResourceTemplatesGeneric typeName conOpts = do
   cons <- reifyCons typeName
   case cons of
     Just constructors -> do
-      templateDefs <- traverse (mkTemplateDefWithDescription descriptions)
+      templateDefs <- traverse (mkTemplateDef conOpts)
                                [c | c@(RecC _ _) <- constructors]
       [| \_ctx -> pure $(return $ ListE templateDefs) |]
-    Nothing -> fail $ "deriveResourceTemplatesWithDescription: " ++ show typeName ++ " is not a data type"
+    Nothing -> fail $ "deriveResourceTemplates: " ++ show typeName ++ " is not a data type"
 
 -- | Derive a 'ResourceTemplateListHandler' from a resource type's record
 -- constructors. Usage:
@@ -534,38 +627,37 @@ templateURI name fields =
   "resource://" <> snakeName name
     <> concat ["/{" <> nameBase fn <> "}" | (fn, _, _) <- fields]
 
-mkTemplateDefWithDescription :: [(String, String)] -> Con -> Q Exp
-mkTemplateDefWithDescription _ (RecC name []) =
+mkTemplateDef :: (String -> DefinitionOptions) -> Con -> Q Exp
+mkTemplateDef _ (RecC name []) =
   fail $ "Resource template constructors need at least one field: " ++ nameBase name
-mkTemplateDefWithDescription descriptions (RecC name fields) = do
-  let description = descriptionFor descriptions (nameBase name) (nameBase name)
+mkTemplateDef conOpts (RecC name fields) = do
+  let opts = conOpts (nameBase name)
+  let description = fromMaybe (T.pack (nameBase name)) (optDescription opts)
   [| ResourceTemplateDefinition
       { resourceTemplateURITemplate = $(litE $ stringL $ templateURI name fields)
       , resourceTemplateName = $(litE $ stringL $ snakeName name)
-      , resourceTemplateDescription = Just $(litE $ stringL description)
+      , resourceTemplateDescription = Just $(lift description)
       , resourceTemplateMimeType = Just "text/plain"
-      , resourceTemplateTitle = Nothing
+      , resourceTemplateTitle = $(lift (optTitle opts))
+      , resourceTemplateIcons = $(lift (optIcons opts))
       } |]
-mkTemplateDefWithDescription _ _ = fail "Resource templates require record constructors"
+mkTemplateDef _ _ = fail "Resource templates require record constructors"
 
-mkResourceDefWithDescription :: [(String, String)] -> Con -> Q Exp
-mkResourceDefWithDescription descriptions (NormalC name []) = do
+mkResourceDef :: (String -> DefinitionOptions) -> Con -> Q Exp
+mkResourceDef conOpts (NormalC name []) = do
   let resourceName = T.pack . snakeName $ name
   let resourceURI = "resource://" <> T.unpack resourceName
-  let constructorName = nameBase name
-  let description = case lookup constructorName descriptions of
-        Just desc -> Just desc
-        Nothing   -> Just constructorName
+  let opts = conOpts (nameBase name)
+  let description = fromMaybe (T.pack (nameBase name)) (optDescription opts)
   [| ResourceDefinition
       { resourceDefinitionURI = $(litE $ stringL resourceURI)
       , resourceDefinitionName = $(litE $ stringL $ T.unpack resourceName)
-      , resourceDefinitionDescription = $(case description of
-          Just desc -> [| Just $(litE $ stringL desc) |]
-          Nothing   -> [| Nothing |])
+      , resourceDefinitionDescription = Just $(lift description)
       , resourceDefinitionMimeType = Just "text/plain"
-      , resourceDefinitionTitle = Nothing
+      , resourceDefinitionTitle = $(lift (optTitle opts))
+      , resourceDefinitionIcons = $(lift (optIcons opts))
       } |]
-mkResourceDefWithDescription _ _ = fail "Unsupported constructor type for resources"
+mkResourceDef _ _ = fail "Unsupported constructor type for resources"
 
 -- One alternative of the read handler: try this constructor, else fall
 -- through to the rest of the chain.
@@ -621,7 +713,21 @@ mkSegmentsDecoder segsName con fields =
 -- > $(deriveToolHandlerWithDescription ''MyTool 'handleTool [("Constructor", "Description")])
 deriveToolHandlerWithDescription :: Name -> Name -> [(String, String)] -> Q Exp
 deriveToolHandlerWithDescription typeName handlerName descriptions =
-  deriveToolHandlerGeneric typeName handlerName descriptions Nothing
+  deriveToolHandlerGeneric typeName handlerName (optionsFromDescriptions descriptions) descriptions Nothing
+
+-- | Derive tool handlers with per-constructor 'DefinitionOptions'
+-- (description, title, icons, behavioral annotations, scoped argument
+-- descriptions). Usage:
+--
+-- > $(deriveToolHandlerWithOptions ''MyTool 'handleTool
+-- >     [ ("Search", defaultDefinitionOptions
+-- >         { optDescription = Just "Search the catalog"
+-- >         , optToolAnnotations = Just defaultToolAnnotations { toolReadOnlyHint = Just True }
+-- >         })
+-- >     ])
+deriveToolHandlerWithOptions :: Name -> Name -> [(String, DefinitionOptions)] -> Q Exp
+deriveToolHandlerWithOptions typeName handlerName opts =
+  deriveToolHandlerGeneric typeName handlerName (optionsFor opts) [] Nothing
 
 -- | Derive tool handlers from a data type.
 -- Usage:
@@ -648,24 +754,35 @@ deriveToolHandlerWithOutput typeName handlerName outputName =
 -- description list is shared with the output type: entries matching output
 -- field names describe the @outputSchema@ properties.
 deriveToolHandlerWithOutputDescription :: Name -> Name -> Name -> [(String, String)] -> Q Exp
-deriveToolHandlerWithOutputDescription typeName handlerName outputName descriptions = do
-  requireOutputRecord outputName
-  deriveToolHandlerGeneric typeName handlerName descriptions (Just outputName)
+deriveToolHandlerWithOutputDescription typeName handlerName outputName descriptions =
+  deriveToolHandlerGeneric typeName handlerName (optionsFromDescriptions descriptions) descriptions (Just outputName)
 
-deriveToolHandlerGeneric :: Name -> Name -> [(String, String)] -> Maybe Name -> Q Exp
-deriveToolHandlerGeneric typeName handlerName descriptions outputName = do
+-- | 'deriveToolHandlerWithOutput' with per-constructor
+-- 'DefinitionOptions'. An entry keyed by the output type's name supplies
+-- the @outputSchema@ field descriptions via 'optFieldDescriptions'.
+deriveToolHandlerWithOutputOptions :: Name -> Name -> Name -> [(String, DefinitionOptions)] -> Q Exp
+deriveToolHandlerWithOutputOptions typeName handlerName outputName opts =
+  deriveToolHandlerGeneric typeName handlerName (optionsFor opts) [] (Just outputName)
+
+deriveToolHandlerGeneric :: Name -> Name -> (String -> DefinitionOptions) -> [(String, String)] -> Maybe Name -> Q Exp
+deriveToolHandlerGeneric typeName handlerName conOpts globalDescs outputName = do
   cons <- reifyCons typeName
   case cons of
     Just constructors -> do
       -- The output type's schema and its matching serializer, when typed
-      -- output is requested
+      -- output is requested. Its field descriptions come from an options
+      -- entry keyed by the output type's own name, merged with the legacy
+      -- global list.
       output <- traverse
-        (\o -> (,) <$> mkSchemaShape descriptions (ConT o)
-                   <*> mkValueBuilder (ConT o))
+        (\o -> do
+          requireOutputRecord o
+          let outDescs = fieldDescsFor (conOpts (nameBase o)) globalDescs
+          (,) <$> mkSchemaShape outDescs (ConT o)
+              <*> mkValueBuilder (ConT o))
         outputName
 
       -- Generate tool definitions
-      toolDefs <- traverse (mkToolDefWithDescription descriptions (fst <$> output)) constructors
+      toolDefs <- traverse (mkToolDef conOpts globalDescs (fst <$> output)) constructors
 
       listHandlerExp <- [| \_ctx -> pure $(return $ ListE toolDefs) |]
 
@@ -681,19 +798,22 @@ deriveToolHandlerGeneric typeName handlerName descriptions outputName = do
       return $ TupE [Just listHandlerExp, Just callHandlerExp]
     Nothing -> fail $ "deriveToolHandler: " ++ show typeName ++ " is not a data type"
 
-mkToolDefWithDescription :: [(String, String)] -> Maybe Exp -> Con -> Q Exp
-mkToolDefWithDescription descriptions outputShape con = do
+mkToolDef :: (String -> DefinitionOptions) -> [(String, String)] -> Maybe Exp -> Con -> Q Exp
+mkToolDef conOpts globalDescs outputShape con = do
   let name = conName con
   let sname = snakeName name
-  let description = descriptionFor descriptions (nameBase name) (nameBase name)
+  let opts = conOpts (nameBase name)
+  let description = fromMaybe (T.pack (nameBase name)) (optDescription opts)
   fields <- getConFields con
-  shapeExp <- mkObjectShape descriptions fields
+  shapeExp <- mkObjectShape (fieldDescsFor opts globalDescs) fields
   [| ToolDefinition
       { toolDefinitionName = $(litE $ stringL sname)
-      , toolDefinitionDescription = $(litE $ stringL description)
+      , toolDefinitionDescription = $(lift description)
       , toolDefinitionInputSchema = Schema Nothing $(return shapeExp)
       , toolDefinitionOutputSchema = $(case outputShape of
           Just shape -> [| Just (Schema Nothing $(return shape)) |]
           Nothing    -> [| Nothing |])
-      , toolDefinitionTitle = Nothing
+      , toolDefinitionTitle = $(lift (optTitle opts))
+      , toolDefinitionAnnotations = $(lift (optToolAnnotations opts))
+      , toolDefinitionIcons = $(lift (optIcons opts))
       } |]
