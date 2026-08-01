@@ -10,9 +10,12 @@ module MCP.Server.Transport.Stdio
   ) where
 
 import           Control.Concurrent     (ThreadId, forkIO, killThread)
-import           Control.Concurrent.MVar (modifyMVar_, newMVar, readMVar,
+import           Control.Concurrent.Async (Async, async, cancel)
+import           Control.Concurrent.MVar (modifyMVar_, newEmptyMVar, newMVar,
+                                          putMVar, readMVar, takeMVar,
                                           withMVar)
 import           Control.Concurrent.STM (atomically, readTChan)
+import           Control.Exception      (finally, uninterruptibleMask_)
 import           Control.Monad          (forever, unless, when)
 import           Data.Aeson
 import qualified Data.Aeson.KeyMap      as KM
@@ -61,23 +64,39 @@ transportRunStdio :: McpServerInfo -> McpServerHandlers -> IO ()
 transportRunStdio = transportRunStdioWithConfig defaultStdioConfig
 
 -- | Run the STDIO transport with the given configuration.
+--
+-- Each request is served in its own task, so a @notifications/cancelled@
+-- naming its id can interrupt it mid-flight (after which nothing further is
+-- written for that id). Cancellation reaches handler code as an
+-- asynchronous exception: handlers that acquire resources should release
+-- them with 'Control.Exception.bracket'.
+--
+-- This also means requests run /concurrently/ (before 0.2.0.1 the stdio
+-- transport processed them strictly sequentially): handlers touching
+-- shared mutable state must synchronize, as was already required of
+-- handlers used with the HTTP transport.
 transportRunStdioWithConfig :: StdioConfig -> McpServerInfo -> McpServerHandlers -> IO ()
 transportRunStdioWithConfig config serverInfo handlers = do
   -- Ensure UTF-8 encoding for all handles
   hSetEncoding stderr utf8
   hSetEncoding stdout utf8
 
-  -- Subscription threads and the main loop share stdout: one line at a time.
+  -- Subscription threads, request tasks and the main loop share stdout:
+  -- one line at a time.
   writeLock <- newMVar ()
   -- Active subscriptions_listen streams, by their request id
   subsVar <- newMVar ([] :: [(RequestId, ThreadId)])
+  -- In-flight request tasks, by request id (cancellable)
+  inflightVar <- newMVar ([] :: [(RequestId, Async ())])
   -- Whether a legacy client has completed initialize (gates legacy pushes)
   legacyReady <- newIORef False
 
   let logLine = TIO.hPutStrLn stderr
       logVerbose msg = when (stdioVerbose config) $ logLine msg
 
-      sendRaw bytes = withMVar writeLock $ \_ -> do
+      -- Writes are uninterruptible so a cancellation arriving mid-write
+      -- cannot corrupt the message channel with a half line
+      sendRaw bytes = withMVar writeLock $ \_ -> uninterruptibleMask_ $ do
         TIO.putStrLn $ TE.decodeUtf8 $ BSL.toStrict bytes
         hFlush stdout
       sendMessage msg = sendRaw $ encode $ encodeJsonRpcMessage msg
@@ -136,6 +155,28 @@ transportRunStdioWithConfig config serverInfo handlers = do
                 sendResponse $ closureResponse serverInfo subId)
             subs
 
+    -- Cancel an in-flight request task. 'cancel' waits for the task to
+    -- finish, so once this returns nothing further is written for that id.
+    cancelInflight cancelledId = do
+      inflight <- readMVar inflightVar
+      case lookup cancelledId inflight of
+        Nothing -> pure False
+        Just task -> do
+          cancel task
+          logLine $ "Cancelled request " <> T.pack (show cancelledId)
+          pure True
+
+    dispatchMessage message = do
+      -- Request-scoped notifications (progress, client logs) share the
+      -- locked stdout channel, interleaved before the response
+      response <- handleMcpMessage serverInfo (stdioCacheHints config) notifSupport sendNotification handlers anonymousContext message
+      case response of
+        Just responseMsg -> do
+          logLine $ "Sending response for: " <> T.pack (show (getMessageSummary message))
+          sendMessage responseMsg
+        Nothing ->
+          logLine $ "No response needed for: " <> T.pack (show (getMessageSummary message))
+
     handleParsed message = case message of
       -- subscriptions/listen is transport-level: the stream outlives the
       -- request. Only intercept when a source is configured and the
@@ -147,15 +188,33 @@ transportRunStdioWithConfig config serverInfo handlers = do
         , maybe True (`elem` modernVersions) (metaProtocolVersion (requestParams req))
         -> openSubscription src req
 
-      -- notifications/cancelled referencing an open subscription tears it
-      -- down (no response, per the cancellation rules)
+      -- Every other request runs in its own task so a later
+      -- notifications/cancelled can interrupt it while the read loop keeps
+      -- serving. The task is registered before its body starts (the gate)
+      -- so cancellation can never race registration; it deregisters itself
+      -- on any exit, including cancellation.
+        | otherwise -> do
+          let rid = requestId req
+          gate <- newEmptyMVar
+          task <- async $ do
+            takeMVar gate
+            dispatchMessage message
+              `finally` modifyMVar_ inflightVar (pure . filter ((/= rid) . fst))
+          modifyMVar_ inflightVar (pure . ((rid, task) :))
+          putMVar gate ()
+
+      -- notifications/cancelled tears down the referenced subscription or
+      -- in-flight request (no response either way, per the cancellation
+      -- rules; unknown ids are ignored as the spec requires)
       JsonRpcMessageNotification notif
         | notificationMethod notif == "notifications/cancelled"
         , Just cancelledId <- cancelledRequestId (notificationParams notif)
         -> do
           wasSub <- cancelSubscription cancelledId
-          unless wasSub $
-            logLine $ "Ignoring cancellation for unknown request " <> T.pack (show cancelledId)
+          unless wasSub $ do
+            wasInflight <- cancelInflight cancelledId
+            unless wasInflight $
+              logLine $ "Ignoring cancellation for unknown request " <> T.pack (show cancelledId)
 
       _ -> do
         -- The client's initialized notification is the legacy ready signal:
@@ -167,20 +226,14 @@ transportRunStdioWithConfig config serverInfo handlers = do
             | notificationMethod n == "notifications/initialized" ->
                 writeIORef legacyReady True
           _ -> pure ()
-        -- Request-scoped notifications (progress, client logs) share the
-        -- locked stdout channel, interleaved before the response
-        response <- handleMcpMessage serverInfo (stdioCacheHints config) notifSupport sendNotification handlers anonymousContext message
-        case response of
-          Just responseMsg -> do
-            logLine $ "Sending response for: " <> T.pack (show (getMessageSummary message))
-            sendMessage responseMsg
-          Nothing ->
-            logLine $ "No response needed for: " <> T.pack (show (getMessageSummary message))
+        dispatchMessage message
 
     loop = do
       eof <- hIsEOF stdin
       if eof
         then do
+          inflight <- readMVar inflightVar
+          mapM_ (cancel . snd) inflight
           closeAllSubscriptions
           logLine "stdin closed - shutting down"
         else do

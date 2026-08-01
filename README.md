@@ -18,6 +18,8 @@ A fully-featured Haskell library for building [Model Context Protocol (MCP)](htt
 - ✅ **Tools**: Model-controlled callable functions
 - ✅ **Completions**: Argument autocompletion for prompts and templates
 - ✅ **Change Notifications**: `listChanged`/resource-update pushes, via `subscriptions/listen` (2026-07-28) or legacy stdio delivery
+- ✅ **Progress & Logging**: `notifications/progress` and `notifications/message` scoped to the requesting client
+- ✅ **Cancellation**: `notifications/cancelled` (stdio) and stream closure (HTTP) interrupt in-flight handlers
 - ✅ **Initialization Flow**: Complete protocol lifecycle with version negotiation
 - ✅ **Error Handling**: Comprehensive error types and JSON-RPC error responses
 
@@ -340,6 +342,42 @@ Delivery is transport-appropriate: on stdio the notifications interleave
 before the response; on HTTP, a request that opted in is answered with an
 SSE response stream carrying the notifications followed by the final
 response (requests that didn't opt in keep the single-JSON response).
+
+## Cancellation
+
+In-flight requests can be cancelled, and per the spec the server then stops
+work as soon as practical and sends nothing further for that request:
+
+- **stdio**: each request runs in its own task; a `notifications/cancelled`
+  naming its id cancels the task (cancellations for unknown or completed ids
+  are ignored, as required).
+- **HTTP**: closing the response stream is the cancellation signal. For SSE
+  responses the handler is cancelled as soon as the disconnect is detected
+  (within one keep-alive interval). For single-JSON responses a disconnect
+  is only detected at the final write — the handler runs to completion
+  first — so mid-handler cancellation applies to streaming requests:
+  clients wanting cancellable calls should opt into streaming via a
+  `progressToken`.
+
+A consequence of cancellable requests: **requests are now served
+concurrently on both transports** (stdio previously processed them strictly
+sequentially). Handlers touching shared mutable state must synchronize
+(`MVar`, `STM`, ...) — as was already required for HTTP servers.
+
+Cancellation is delivered to handler code as an asynchronous exception (the
+standard GHC mechanism, as used by `timeout` and `cancel`). Handlers are
+interruptible wherever they block in `IO`; a handler that acquires resources
+must release them with `bracket`/`finally` so cancellation cannot leak them:
+
+```haskell
+handleTool ctx (ImportData file) =
+    bracket (openFile file ReadMode) hClose $ \h -> do
+        ...
+```
+
+Handlers that must not be interrupted mid-operation can shield critical
+sections with `mask`, but should keep them short — cancellation waits for
+them.
 
 ## Change Notifications
 

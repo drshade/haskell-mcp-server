@@ -9,6 +9,21 @@ including changes that would ordinarily demand a major bump. Anyone
 explicitly pinning the deprecated 0.2.0.0 should move here. The unreleased
 0.2.1.0 line below is folded in as well.)
 
+* Request cancellation (ADR 0008): in-flight requests can now actually be
+  interrupted, per the spec's "stop work as soon as practical, send nothing
+  further for that request". On stdio every request runs in its own task
+  and `notifications/cancelled` cancels the referenced one (unknown or
+  completed ids are ignored); on HTTP, closing an SSE response stream
+  cancels the running handler (detected within one keep-alive interval,
+  now 5s). Single-JSON HTTP responses only detect a disconnect at the
+  final write, so clients wanting cancellable calls should opt into
+  streaming via a `progressToken`. Cancellation is delivered as an
+  asynchronous exception, so handlers acquiring resources should use
+  `bracket` — documented in the README. BREAKING (behavioral): stdio
+  requests are now served concurrently rather than strictly
+  sequentially — handlers touching shared mutable state must
+  synchronize, as was already required with the HTTP transport. New
+  dependency: `async`.
 * Progress notifications and per-request SSE (ADR 0007): handlers can
   call `reportProgress` and `logToClient` on the `ClientContext` — both
   safe unconditionally. `reportProgress` emits `notifications/progress`
