@@ -30,6 +30,7 @@ module MCP.Server.Handlers
   , errorMessageFromMcpError
   ) where
 
+import           Control.Monad          (when)
 import           Data.Aeson
 import qualified Data.Aeson.Key         as Key
 import qualified Data.Aeson.KeyMap      as KM
@@ -82,10 +83,15 @@ validateProtocolVersion clientVersion
 -- | Look up an @io.modelcontextprotocol/\<key\>@ entry in a request's
 -- params @_meta@ object.
 metaLookup :: Text -> Maybe Value -> Maybe Value
-metaLookup key params = do
+metaLookup key params = plainMetaLookup ("io.modelcontextprotocol/" <> key) params
+
+-- | Look up an unprefixed key in a request's params @_meta@ object
+-- (e.g. @progressToken@, which the spec defines without a prefix).
+plainMetaLookup :: Text -> Maybe Value -> Maybe Value
+plainMetaLookup key params = do
   Object o <- params
   Object m <- KM.lookup "_meta" o
-  KM.lookup (Key.fromText ("io.modelcontextprotocol/" <> key)) m
+  KM.lookup (Key.fromText key) m
 
 -- | The protocol revision a request declares in its params @_meta@
 -- (modern, 2026-07-28+ clients). 'Nothing' for legacy requests.
@@ -149,14 +155,20 @@ decorateModern serverInfo hints method resp = case responseResult resp of
 -- its params @_meta@ (2026-07-28+) is served statelessly with the modern
 -- result envelope; a request that does not is served exactly as before
 -- under the revision negotiated by @initialize@.
+--
+-- @emit@ is the transport's request-scoped notification sink: progress and
+-- client-log notifications for /this request/ are delivered through it,
+-- interleaved before the response (stdio's shared channel, or the
+-- request's SSE response stream on HTTP).
 handleMcpMessage :: McpServerInfo
                  -> CacheHints
                  -> NotificationSupport
+                 -> (JsonRpcNotification -> IO ())
                  -> McpServerHandlers
                  -> ClientContext
                  -> JsonRpcMessage
                  -> IO (Maybe JsonRpcMessage)
-handleMcpMessage serverInfo hints notifSupport handlers ctx0 (JsonRpcMessageRequest req) = do
+handleMcpMessage serverInfo hints notifSupport emit handlers ctx0 (JsonRpcMessageRequest req) = do
   let params = requestParams req
       declaredVersion = metaProtocolVersion params
   case declaredVersion of
@@ -172,6 +184,8 @@ handleMcpMessage serverInfo hints notifSupport handlers ctx0 (JsonRpcMessageRequ
             { clientProtocolVersion = declaredVersion
             , clientInfo = metaLookup "clientInfo" params
             , clientCapabilities = metaLookup "clientCapabilities" params
+            , reportProgress = progressReporter emit params
+            , logToClient = clientLogger emit params
             }
       response <- case requestMethod req of
         -- Era purity: the modern revision has neither initialize (nothing to
@@ -206,7 +220,7 @@ handleMcpMessage serverInfo hints notifSupport handlers ctx0 (JsonRpcMessageRequ
             else response
       return $ Just $ JsonRpcMessageResponse response'
 
-handleMcpMessage _ _ _ _ _ (JsonRpcMessageNotification notif) = do
+handleMcpMessage _ _ _ _ _ _ (JsonRpcMessageNotification notif) = do
   case notificationMethod notif of
     "notifications/initialized" ->
       hPutStrLn stderr "Received initialized notification - server is ready for operation"
@@ -214,8 +228,41 @@ handleMcpMessage _ _ _ _ _ (JsonRpcMessageNotification notif) = do
       hPutStrLn stderr $ "Received unknown notification: " ++ T.unpack (notificationMethod notif)
   return Nothing
 
-handleMcpMessage _ _ _ _ _ (JsonRpcMessageResponse _) =
+handleMcpMessage _ _ _ _ _ _ (JsonRpcMessageResponse _) =
   return Nothing
+
+-- | The 'reportProgress' action for a request: emits
+-- @notifications\/progress@ tagged with the request's @progressToken@, or
+-- does nothing when no token was provided.
+progressReporter :: (JsonRpcNotification -> IO ()) -> Maybe Value -> Double -> Maybe Double -> Maybe Text -> IO ()
+progressReporter emit params = case plainMetaLookup "progressToken" params of
+  Nothing    -> \_ _ _ -> pure ()
+  Just token -> \progress total message ->
+    emit $ makeNotification "notifications/progress" $ Just $ object $
+      [ "progressToken" .= token
+      , "progress" .= progress
+      ] ++ maybe [] (\t -> ["total" .= t]) total
+        ++ maybe [] (\m -> ["message" .= m]) message
+
+-- | The 'logToClient' action for a request: emits @notifications\/message@
+-- at or above the request's declared @io.modelcontextprotocol/logLevel@,
+-- and nothing at all when the request did not declare one (the spec
+-- forbids it).
+clientLogger :: (JsonRpcNotification -> IO ()) -> Maybe Value -> LogLevel -> Value -> IO ()
+clientLogger emit params = case declared of
+  Nothing        -> \_ _ -> pure ()
+  Just threshold -> \level payload ->
+    when (level >= threshold) $
+      emit $ makeNotification "notifications/message" $ Just $ object
+        [ "level" .= level
+        , "data" .= payload
+        ]
+  where
+    declared = do
+      v <- metaLookup "logLevel" params
+      case fromJSON v of
+        Success l -> Just l
+        Error _   -> Nothing
 
 -- | Handle initialize request
 handleInitialize :: McpServerInfo -> NotificationSupport -> McpServerHandlers -> JsonRpcRequest -> IO JsonRpcResponse

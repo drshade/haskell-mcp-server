@@ -12,6 +12,7 @@ import qualified Spec.DefinitionMetadata
 import qualified Spec.DerivedOutput
 import qualified Spec.GoldenWire
 import qualified Spec.ModernEra
+import qualified Spec.Progress
 import qualified Spec.ProtocolVersionNegotiation
 import qualified Spec.Subscriptions
 import qualified Spec.TemplatesCompletions
@@ -30,6 +31,7 @@ main = hspec $ do
     Spec.DerivedOutput.spec
     Spec.GoldenWire.spec
     Spec.ModernEra.spec
+    Spec.Progress.spec
     Spec.ProtocolVersionNegotiation.spec
     Spec.Subscriptions.spec
     Spec.TemplatesCompletions.spec

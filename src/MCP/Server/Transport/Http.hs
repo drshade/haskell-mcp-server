@@ -103,6 +103,22 @@ logVerbose config msg = when (httpVerbose config) $ hPutStrLn stderr msg
 httpHasNotifications :: HttpConfig -> Bool
 httpHasNotifications = isJust . httpNotifications
 
+-- | What notification delivery this HTTP server offers.
+httpNotifSupport :: HttpConfig -> NotificationSupport
+httpNotifSupport config = NotificationSupport
+  { supportsLegacyPush = False  -- no legacy HTTP delivery channel
+  , supportsListen = httpHasNotifications config
+  }
+
+-- | Response headers for an SSE stream: no caching, and no proxy
+-- buffering, so events reach the client immediately.
+sseHeaders :: ResponseHeaders
+sseHeaders =
+  [ ("Content-Type", "text/event-stream")
+  , ("Cache-Control", "no-cache")
+  , ("X-Accel-Buffering", "no")
+  ]
+
 
 -- | Transport-specific implementation for HTTP
 transportRunHttp :: HttpConfig -> McpServerInfo -> McpServerHandlers -> IO ()
@@ -224,6 +240,10 @@ handleMcpRequest config serverInfo handlers ctx req respond = do
           | peekMethod peek == Just "subscriptions/listen"
           , Just src <- httpNotifications config
           -> handleSubscriptionsListen config src body respond
+          -- Requests that opted into request-scoped notifications get an
+          -- SSE response stream carrying them before the final response
+          | peekWantsStream peek
+          -> handleStreamingRequest config serverInfo handlers ctx body respond
           | otherwise -> do
               logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
               handleJsonRpcRequest config serverInfo handlers ctx modern body respond
@@ -244,12 +264,17 @@ handleMcpRequest config serverInfo handlers ctx req respond = do
       [("Content-Type", "text/plain"), ("Allow", "POST, OPTIONS")]
       "Method Not Allowed"
 
--- | The parts of a JSON-RPC body that header validation needs.
+-- | The parts of a JSON-RPC body that header validation and response-mode
+-- selection need.
 data BodyPeek = BodyPeek
   { peekMethod      :: Maybe Text
   , peekMetaVersion :: Maybe Text
   , peekName        :: Maybe Text  -- ^ params.name or params.uri
   , peekId          :: RequestId
+  , peekWantsStream :: Bool
+      -- ^ The request opted into request-scoped notifications
+      -- (@_meta.progressToken@ or @_meta.\"io.modelcontextprotocol/logLevel\"@),
+      -- so the response must be an SSE stream that can carry them
   }
 
 -- | Whether the body declares a modern (2026-07-28+) request.
@@ -273,8 +298,15 @@ peekBody body = case decode body of
     , peekId = case KM.lookup "id" o of
         Just v  -> either (const RequestIdNull) id (parseEither parseJSON v)
         Nothing -> RequestIdNull
+    , peekWantsStream = case KM.lookup "params" o of
+        Just (Object p) -> case KM.lookup "_meta" p of
+          Just (Object m) ->
+            KM.member "progressToken" m
+              || KM.member "io.modelcontextprotocol/logLevel" m
+          _ -> False
+        _ -> False
     }
-  _ -> BodyPeek Nothing Nothing Nothing RequestIdNull
+  _ -> BodyPeek Nothing Nothing Nothing RequestIdNull False
 
 -- | Validate the request-metadata headers against the body. 'Nothing' means
 -- the request may proceed; @'Just' err@ is answered with 400 and the given
@@ -362,13 +394,7 @@ handleSubscriptionsListen config src body respond =
       let subId = requestId req
           notifFilter = parseNotificationFilter (requestParams req)
       logVerbose config $ "Opening subscription stream " ++ show subId
-      respond $ Wai.responseStream
-        status200
-        [ ("Content-Type", "text/event-stream")
-        , ("Cache-Control", "no-cache")
-        , ("X-Accel-Buffering", "no")
-        ]
-        $ \write flush -> do
+      respond $ Wai.responseStream status200 sseHeaders $ \write flush -> do
           chan <- atomically $ subscribeEvents src
           let sendJson v = do
                 write $ B.lazyByteString $ "data: " <> encode v <> "\n\n"
@@ -387,6 +413,34 @@ handleSubscriptionsListen config src body respond =
               Nothing -> do
                 write $ B.byteString ": keep-alive\n\n"
                 flush
+
+-- | Serve a request that opted into request-scoped notifications: the
+-- response is an SSE stream on which progress and client-log notifications
+-- flow, followed by the final JSON-RPC response.
+handleStreamingRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleStreamingRequest config serverInfo handlers ctx body respond =
+  respond $ Wai.responseStream status200 sseHeaders $ \write flush -> do
+    let sendEvent v = do
+          write $ B.lazyByteString $ "data: " <> encode v <> "\n\n"
+          flush
+        emit n = sendEvent (toJSON (n :: JsonRpcNotification))
+    case eitherDecode body of
+      Left err -> do
+        hPutStrLn stderr $ "JSON parse error: " ++ err
+        sendEvent $ toJSON $ makeErrorResponse RequestIdNull $ JsonRpcError
+          { errorCode = -32700, errorMessage = "Parse error", errorData = Nothing }
+      Right jsonValue -> case parseJsonRpcMessage jsonValue of
+        Left err -> do
+          hPutStrLn stderr $ "JSON-RPC parse error: " ++ err
+          sendEvent $ toJSON $ makeErrorResponse RequestIdNull $ JsonRpcError
+            { errorCode = -32600, errorMessage = "Invalid Request", errorData = Nothing }
+        Right message -> do
+          logVerbose config $ "Processing streaming HTTP message: " ++ show (getMessageSummary message)
+          maybeResponse <- handleMcpMessage serverInfo (httpCacheHints config)
+            (httpNotifSupport config) emit handlers ctx message
+          case maybeResponse of
+            Just responseMsg -> sendEvent (encodeJsonRpcMessage responseMsg)
+            Nothing          -> pure ()
 
 -- | Handle JSON-RPC request from HTTP body
 handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Bool -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
@@ -422,11 +476,10 @@ handleSingleJsonRpc config serverInfo handlers ctx modern jsonValue respond = do
 
     Right message -> do
       logVerbose config $ "Processing HTTP message: " ++ show (getMessageSummary message)
-      let notifSupport = NotificationSupport
-            { supportsLegacyPush = False  -- no legacy HTTP delivery channel
-            , supportsListen = httpHasNotifications config
-            }
-      maybeResponse <- handleMcpMessage serverInfo (httpCacheHints config) notifSupport handlers ctx message
+      -- Single-JSON responses have no channel for request-scoped
+      -- notifications; requests that want them take the streaming path.
+      maybeResponse <- handleMcpMessage serverInfo (httpCacheHints config)
+        (httpNotifSupport config) (\_ -> pure ()) handlers ctx message
 
       case maybeResponse of
         Just responseMsg -> do

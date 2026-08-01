@@ -167,7 +167,9 @@ transportRunStdioWithConfig config serverInfo handlers = do
             | notificationMethod n == "notifications/initialized" ->
                 writeIORef legacyReady True
           _ -> pure ()
-        response <- handleMcpMessage serverInfo (stdioCacheHints config) notifSupport handlers anonymousContext message
+        -- Request-scoped notifications (progress, client logs) share the
+        -- locked stdout channel, interleaved before the response
+        response <- handleMcpMessage serverInfo (stdioCacheHints config) notifSupport sendNotification handlers anonymousContext message
         case response of
           Just responseMsg -> do
             logLine $ "Sending response for: " <> T.pack (show (getMessageSummary message))

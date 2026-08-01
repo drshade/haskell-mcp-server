@@ -9,6 +9,20 @@ including changes that would ordinarily demand a major bump. Anyone
 explicitly pinning the deprecated 0.2.0.0 should move here. The unreleased
 0.2.1.0 line below is folded in as well.)
 
+* Progress notifications and per-request SSE (ADR 0007): handlers can
+  call `reportProgress` and `logToClient` on the `ClientContext` — both
+  safe unconditionally. `reportProgress` emits `notifications/progress`
+  only when the request carried a `progressToken`; `logToClient` emits
+  `notifications/message` only when the request declared
+  `io.modelcontextprotocol/logLevel` (per spec MUST NOT otherwise),
+  filtered to the declared threshold (new `LogLevel` type, RFC 5424
+  ordering). On stdio the notifications interleave before the response;
+  on HTTP a request that opted in is answered with an SSE response
+  stream (notifications, then the final response), while other requests
+  keep the single-JSON response. BREAKING: `ClientContext` carries the
+  two actions and loses its `Show`/`Eq` instances;
+  `MCP.Server.Handlers.handleMcpMessage` takes the transport's
+  notification sink.
 * Definition metadata (ADR 0006):
     * `ToolAnnotations` — `readOnlyHint`/`destructiveHint`/`idempotentHint`/
       `openWorldHint` behavioral hints (2025-03-26+) plus a title, all unset

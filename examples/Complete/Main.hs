@@ -33,10 +33,15 @@ handleResource _ uri (ProductDetail sku) =
 -- with isError so the model can see them (returning plain Content works too
 -- for simple tools — see the other examples).
 handleTool :: ClientContext -> MyTool -> IO ToolResult
-handleTool _ (SearchForProduct q category) =
-    case category of
+handleTool ctx (SearchForProduct q category) = do
+    -- Progress reporting is safe to call unconditionally: it is a no-op
+    -- unless the request carried a progressToken
+    reportProgress ctx 0.5 (Just 1.0) (Just "searching the catalog")
+    result <- case category of
         Nothing -> pure $ toolResult [ContentText $ "Search results for '" <> q <> "': Found 15 products across all categories"]
         Just cat -> pure $ toolResult [ContentText $ "Search results for '" <> q <> "' in " <> cat <> ": Found 8 products"]
+    reportProgress ctx 1.0 (Just 1.0) Nothing
+    pure result
 handleTool _ (AddToCart sku quantities)
     | any (<= 0) quantities = pure $ toolError "Quantities must be positive"
     | otherwise = pure $ toolResult

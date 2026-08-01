@@ -121,6 +121,7 @@ spec = describe "Change notifications" $ do
           (McpServerInfo "T" "1" "")
           defaultCacheHints
           support
+          (\_ -> pure ())
           toolsServer
           anonymousContext
           (JsonRpcMessageRequest (JsonRpcRequest "2.0" (RequestIdNumber 1) method params))
