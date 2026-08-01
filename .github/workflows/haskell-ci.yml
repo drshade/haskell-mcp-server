@@ -14,10 +14,27 @@
 #
 name: Haskell-CI
 on:
-  - push
-  - pull_request
-  - merge_group
-  - workflow_dispatch
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'specs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'specs/**'
+      - 'LICENSE'
+      - '.gitignore'
+  merge_group:
+  workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Supersede in-flight runs on new pushes to the same branch/PR, but let
+  # runs on main finish
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   linux:
     name: Haskell-CI - Linux - ${{ matrix.compiler }}
