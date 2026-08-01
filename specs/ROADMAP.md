@@ -5,14 +5,14 @@ Where mcp-server is headed, as an ordering over the open
 batched (no release per feature), and the order reflects dependency and
 value, not commitment.
 
-**Current state**: 0.2.0.0 is on Hackage (typed core, dual-era protocol
-support for 2024-11-05…2025-11-25 via `initialize` and stateless
-2026-07-28, resource templates, completions, change notifications with
-`subscriptions/listen`) but is deprecated there in favor of the pending
-line: 0.2.0.1 sits merged-but-unreleased (WAI application export,
-conformance corpus, and Batch 1: derived output schemas, definition
-metadata), soaking until released. 0.2.0.1 knowingly supersedes the
-never-adopted 0.2.0.0 in place rather than burning a major version.
+**Current state**: 0.2.0.1 is released (2026-08-01), superseding the
+deprecated, never-adopted 0.2.0.0 in place rather than burning a major
+version. On top of 0.2.0.0's typed core and dual-era protocol support
+(2024-11-05…2025-11-25 via `initialize`, stateless 2026-07-28), it adds
+the WAI application export, the conformance corpus, Batch 1 (derived
+output schemas, definition metadata) and Batch 2 (progress
+notifications, per-request SSE, client logging, request cancellation).
+Batch 3 onward is future work with no scheduled date.
 
 ## Batch 1 — complete the typed core *(landed)*
 
@@ -24,12 +24,14 @@ Both landed in the pending 0.2.0.1.
    0.2.0.1 because the only affected release, 0.2.0.0, is deprecated with
    zero adopters).
 
-## Batch 2 — long-running tools
+## Batch 2 — long-running tools *(landed)*
+
+Both landed in 0.2.0.1.
 
 3. [ADR_0007 — Progress notifications and per-request SSE](ADR_0007_progress_notifications.md) — **Landed**.
-4. [ADR_0008 — Cancellation of in-flight requests](ADR_0008_request_cancellation.md).
-   Only meaningful on top of ADR_0007's execution model — sequenced
-   immediately after, possibly the same release.
+4. [ADR_0008 — Cancellation of in-flight requests](ADR_0008_request_cancellation.md) — **Landed**
+   (sequenced immediately after ADR_0007, whose execution model it
+   builds on, and shipped in the same release).
 
 ## Batch 3 — interactivity
 

@@ -1,6 +1,6 @@
 # Revision history for mcp-server
 
-## 0.2.0.1 - ???
+## 0.2.0.1 - 2026-08-01
 
 (Supersedes 0.2.0.0, which is **deprecated on Hackage**: it was published
 hours before this line landed and was never adopted, so rather than
