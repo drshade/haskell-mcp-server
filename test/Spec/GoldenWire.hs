@@ -110,6 +110,17 @@ goldenStructHandler :: ClientContext -> GoldenStructTool -> IO (ToolOutput Golde
 goldenStructHandler _ (EchoStructured t) =
   pure $ ToolOutput (GoldenEchoOutput t (T.length t))
 
+-- The extended set's annotated tool (ADR 0006): read-only hints, icon and
+-- title on the definition; annotated content on the result
+data GoldenAnnotatedTool = AnnotatedProbe { probe :: Text }
+
+goldenAnnotatedHandler :: ClientContext -> GoldenAnnotatedTool -> IO ToolResult
+goldenAnnotatedHandler _ (AnnotatedProbe p) = pure $ toolResult
+  [ ContentAnnotated
+      defaultAnnotations { annotationsAudience = [RoleUser], annotationsPriority = Just 0.5 }
+      (ContentText ("probed: " <> p))
+  ]
+
 $(pure [])
 
 structuredTools :: (ToolListHandler, ToolCallHandler)
@@ -119,6 +130,21 @@ structuredTools = $(deriveToolHandlerWithOutputDescription
   , ("input", "The text")
   , ("echoedText", "The echoed text")
   , ("echoedLength", "Its length")
+  ])
+
+annotatedTools :: (ToolListHandler, ToolCallHandler)
+annotatedTools = $(deriveToolHandlerWithOptions
+  ''GoldenAnnotatedTool 'goldenAnnotatedHandler
+  [ ("AnnotatedProbe", defaultDefinitionOptions
+      { optDescription = Just "A read-only probe"
+      , optTitle = Just "Probe"
+      , optIcons = [icon "https://example.com/probe.png"]
+      , optToolAnnotations = Just defaultToolAnnotations
+          { toolReadOnlyHint = Just True
+          , toolIdempotentHint = Just True
+          }
+      , optFieldDescriptions = [("probe", "What to probe")]
+      })
   ])
 
 -- | 'goldenHandlers' extended with the handler slots and tools introduced
@@ -139,8 +165,12 @@ extendedHandlers = goldenHandlers
   , tools = do
       (baseList, baseCall) <- tools goldenHandlers
       let (sList, sCall) = structuredTools
-      pure ( \c -> (++) <$> baseList c <*> sList c
-           , \c n a -> if n == "echo_structured" then sCall c n a else baseCall c n a
+          (aList, aCall) = annotatedTools
+      pure ( \c -> concat <$> sequence [baseList c, sList c, aList c]
+           , \c n a -> case n of
+               "echo_structured" -> sCall c n a
+               "annotated_probe" -> aCall c n a
+               _                 -> baseCall c n a
            )
   }
 

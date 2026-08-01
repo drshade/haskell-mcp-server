@@ -31,7 +31,7 @@ module MCP.Server.Derive
 
     -- * Per-constructor customization
   , DefinitionOptions(..)
-  , defaultOptions
+  , defaultDefinitionOptions
   ) where
 
 import           Control.Monad       (zipWithM)
@@ -65,8 +65,8 @@ data DefinitionOptions = DefinitionOptions
   } deriving (Show, Eq, Lift)
 
 -- | Nothing customized; record-update what you need.
-defaultOptions :: DefinitionOptions
-defaultOptions = DefinitionOptions
+defaultDefinitionOptions :: DefinitionOptions
+defaultDefinitionOptions = DefinitionOptions
   { optDescription = Nothing
   , optTitle = Nothing
   , optIcons = []
@@ -76,14 +76,14 @@ defaultOptions = DefinitionOptions
 
 -- | Look up a constructor's options.
 optionsFor :: [(String, DefinitionOptions)] -> String -> DefinitionOptions
-optionsFor opts name = fromMaybe defaultOptions (lookup name opts)
+optionsFor opts name = fromMaybe defaultDefinitionOptions (lookup name opts)
 
 -- | Adapt the legacy flat description list to per-constructor options:
 -- constructor entries become 'optDescription'; the whole list also serves
 -- as the (unscoped) field-description namespace, preserving the old
 -- behavior exactly.
 optionsFromDescriptions :: [(String, String)] -> String -> DefinitionOptions
-optionsFromDescriptions descriptions name = defaultOptions
+optionsFromDescriptions descriptions name = defaultDefinitionOptions
   { optDescription = T.pack <$> lookup name descriptions
   }
 
@@ -441,7 +441,7 @@ derivePromptHandlerWithDescription typeName handlerName descriptions =
 -- (title, icons, scoped argument descriptions). Usage:
 --
 -- > $(derivePromptHandlerWithOptions ''MyPrompt 'handlePrompt
--- >     [("Recipe", defaultOptions { optDescription = Just "…" })])
+-- >     [("Recipe", defaultDefinitionOptions { optDescription = Just "…" })])
 derivePromptHandlerWithOptions :: Name -> Name -> [(String, DefinitionOptions)] -> Q Exp
 derivePromptHandlerWithOptions typeName handlerName opts =
   derivePromptHandlerGeneric typeName handlerName (optionsFor opts) []
@@ -720,7 +720,7 @@ deriveToolHandlerWithDescription typeName handlerName descriptions =
 -- descriptions). Usage:
 --
 -- > $(deriveToolHandlerWithOptions ''MyTool 'handleTool
--- >     [ ("Search", defaultOptions
+-- >     [ ("Search", defaultDefinitionOptions
 -- >         { optDescription = Just "Search the catalog"
 -- >         , optToolAnnotations = Just defaultToolAnnotations { toolReadOnlyHint = Just True }
 -- >         })

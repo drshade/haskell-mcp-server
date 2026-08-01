@@ -1,6 +1,6 @@
 # ADR 0006: Tool annotations, icons, content annotations
 
-- **Status**: Proposed
+- **Status**: Landed (0.3.0.0)
 - **Date**: 2026-08-01
 - **Depends on**: —
 
