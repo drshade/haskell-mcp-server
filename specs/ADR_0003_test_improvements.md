@@ -1,3 +1,5 @@
+> **ADR_0003 — Historical.** This document predates the ADR convention: it is preserved as-written (a working note from the time), renumbered for the index. New ADRs follow the format described in [README.md](README.md).
+
 # Test Suite Improvement Recommendations
 
 ## Current State Analysis

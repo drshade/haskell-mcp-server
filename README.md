@@ -381,6 +381,11 @@ Haskell-specific — any MCP server implementation that reproduces the small
 reference server described in the corpus README can replay the requests and
 diff the responses. Contributions of new cases are welcome.
 
+## Roadmap
+
+Design decisions and planned work live as ADRs under
+[`specs/`](specs/README.md), ordered by [`specs/ROADMAP.md`](specs/ROADMAP.md).
+
 ## Examples
 
 The library includes several examples:
