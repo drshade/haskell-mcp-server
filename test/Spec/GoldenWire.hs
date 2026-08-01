@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TemplateHaskell   #-}
 
 -- | Golden wire-format conformance corpus: @test/golden/@ holds, per case,
 -- a JSON-RPC request (@\<name\>.request.json@) and the reference server's
@@ -34,6 +35,7 @@ import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as T
 import MCP.Server
+import MCP.Server.Derive
 import MCP.Server.Handlers (handleMcpMessage)
 import MCP.Server.JsonRpc
 import System.Directory (doesFileExist)
@@ -85,10 +87,35 @@ goldenHandlers = noHandlers
       "boom" -> pure $ Right $ toolError "kaboom"
       _      -> pure $ Left $ UnknownTool name
 
--- | 'goldenHandlers' extended with the handler slots introduced after
--- v0.2.0. Used only for the fixtures of methods that postdate the legacy
--- anchor: extending the main handler set would change the advertised
--- capabilities and perturb the v0.2.0-anchored initialize fixture.
+-- The extended set's structured-output tool, derived so the corpus pins
+-- exactly what the TH derivation puts on the wire (ADR 0005)
+data GoldenEchoOutput = GoldenEchoOutput
+  { echoedText   :: Text
+  , echoedLength :: Int
+  }
+
+data GoldenStructTool = EchoStructured { input :: Text }
+
+goldenStructHandler :: ClientContext -> GoldenStructTool -> IO (ToolOutput GoldenEchoOutput)
+goldenStructHandler _ (EchoStructured t) =
+  pure $ ToolOutput (GoldenEchoOutput t (T.length t))
+
+$(pure [])
+
+structuredTools :: (ToolListHandler, ToolCallHandler)
+structuredTools = $(deriveToolHandlerWithOutputDescription
+  ''GoldenStructTool 'goldenStructHandler ''GoldenEchoOutput
+  [ ("EchoStructured", "Echo with structured output")
+  , ("input", "The text")
+  , ("echoedText", "The echoed text")
+  , ("echoedLength", "Its length")
+  ])
+
+-- | 'goldenHandlers' extended with the handler slots and tools introduced
+-- after v0.2.0. Used only for the fixtures of methods/behaviors that
+-- postdate the legacy anchor: extending the main handler set would change
+-- the advertised capabilities and perturb the v0.2.0-anchored initialize
+-- fixture.
 extendedHandlers :: McpServerHandlers
 extendedHandlers = goldenHandlers
   { resourceTemplates = Just $ \_ -> pure
@@ -97,6 +124,12 @@ extendedHandlers = goldenHandlers
       ]
   , completions = Just $ \_ _ref _arg partial _ctx -> pure $ Right $
       completionResult (filter (T.isPrefixOf partial) ["alpha", "beta"])
+  , tools = do
+      (baseList, baseCall) <- tools goldenHandlers
+      let (sList, sCall) = structuredTools
+      pure ( \c -> (++) <$> baseList c <*> sList c
+           , \c n a -> if n == "echo_structured" then sCall c n a else baseCall c n a
+           )
   }
 
 -- | One manifest entry: which case, and which reference-server variant

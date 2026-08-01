@@ -34,11 +34,15 @@ module MCP.Server.Derive.Internal
     -- * Resource template matching
   , matchTemplateSegments
   , templateField
+    -- * Structured output
+  , resolveToolOutput
+  , omitNothing
   ) where
 
 import           Data.Aeson           (Value (..), encode)
 import qualified Data.Aeson.Key       as Key
 import qualified Data.Aeson.KeyMap    as KM
+import           Data.Aeson.Types     (Pair)
 import qualified Data.ByteString.Lazy as BSL
 import           Data.Foldable        (toList)
 import           Data.Map             (Map)
@@ -51,7 +55,9 @@ import qualified Data.Text.Encoding   as TE
 import           Network.URI          (unEscapeString)
 import           Text.Read            (readMaybe)
 
-import           MCP.Server.Types     (Error (..))
+import           MCP.Server.Types     (Content (..), Error (..),
+                                       ToolOutput (..), ToolResult (..),
+                                       toolError, toolResult)
 
 -- ---------------------------------------------------------------------------
 -- Text-based parsers (prompt arguments are strings per the MCP spec)
@@ -213,3 +219,29 @@ templateField :: Text -> (Text -> Either Text a) -> [Text] -> Int -> Either Erro
 templateField name p segs i = case drop i segs of
   (s:_) -> either (Left . InvalidParams . (("template field '" <> name <> "': ") <>)) Right (p s)
   []    -> Left $ InvalidParams $ "missing segment for template field '" <> name <> "'"
+
+-- ---------------------------------------------------------------------------
+-- Structured output
+-- ---------------------------------------------------------------------------
+
+-- | Turn a 'ToolOutput' into the 'ToolResult' that goes on the wire, given
+-- the generated serializer for the output type. A plain 'ToolOutput' also
+-- carries the serialized JSON as a text content block, per the spec's
+-- recommendation for clients that predate structured output.
+resolveToolOutput :: (o -> Value) -> ToolOutput o -> ToolResult
+resolveToolOutput serialize out = case out of
+  ToolOutput o ->
+    let v = serialize o
+    in (toolResult [ContentText (jsonText v)]) { toolResultStructured = Just v }
+  ToolOutputWith content o ->
+    (toolResult content) { toolResultStructured = Just (serialize o) }
+  ToolOutputError msg -> toolError msg
+  ToolOutputRaw result -> result
+  where
+    jsonText = TE.decodeUtf8 . BSL.toStrict . encode
+
+-- | A record field for the generated serializers: absent when 'Nothing',
+-- mirroring how the generated schema marks 'Maybe' fields optional.
+omitNothing :: Text -> (a -> Value) -> Maybe a -> [Pair]
+omitNothing _ _ Nothing        = []
+omitNothing name f (Just x)    = [(Key.fromText name, f x)]

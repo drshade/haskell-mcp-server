@@ -2,6 +2,20 @@
 
 ## 0.2.1.0 - ???
 
+* Derived output schemas and structured content (ADR 0005): the new
+  `deriveToolHandlerWithOutput` (and `...WithOutputDescription`) take a
+  result record type, derive the tools' `outputSchema` from it (same field
+  rules as input derivation: primitives, `Maybe`, lists, all-nullary
+  enums, nested records), and serialize the handler's typed values into
+  `structuredContent` — the generated serializer mirrors the generated
+  schema, so the two cannot drift. Handlers return the new
+  `ToolOutput` type: `ToolOutput` (structured value; the JSON is also
+  returned as a text content block per the spec's recommendation),
+  `ToolOutputWith` (custom content blocks), `ToolOutputError` (isError),
+  or `ToolOutputRaw` (plain `ToolResult` escape hatch). Existing
+  `ToToolResult` handlers are untouched. The conformance corpus gains an
+  `echo_structured` reference tool with cases in both eras.
+
 * The HTTP transport's WAI application is now exported (`mcpApplication`,
   re-exported from `MCP.Server`), so the MCP endpoint can be embedded into
   an existing WAI stack — your own Warp settings, TLS, middleware or router

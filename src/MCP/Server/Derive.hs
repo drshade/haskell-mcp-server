@@ -20,6 +20,8 @@ module MCP.Server.Derive
   , deriveResourceTemplatesWithDescription
   , deriveToolHandler
   , deriveToolHandlerWithDescription
+  , deriveToolHandlerWithOutput
+  , deriveToolHandlerWithOutputDescription
   ) where
 
 import           Data.Aeson          (Value (..))
@@ -215,10 +217,72 @@ mkTextParser ty = case ty of
   _ -> fail $ "Unsupported prompt argument type (prompt arguments are strings): " ++ show ty
 
 -------------------------------------------------------------------------------
+-- Value serializers (structured output)
+-------------------------------------------------------------------------------
+
+-- Build a serializer expression of type @a -> Value@ that mirrors
+-- 'mkSchemaShape' exactly: what the schema promises is what the value
+-- contains (snake_cased enums, 'Maybe' fields omitted when 'Nothing').
+mkValueBuilder :: Type -> Q Exp
+mkValueBuilder ty = case ty of
+  ConT n | nameBase n `elem` ["Int", "Integer", "Double", "Float", "Bool", "Text"] ->
+    [| toJSON |]
+  AppT ListT inner ->
+    [| \xs -> toJSON (map $(mkValueBuilder inner) xs) |]
+  ConT n -> do
+    cons <- reifyCons n
+    case cons of
+      Just cs | not (null cs), all isNullary cs -> do
+        vVar <- newName "v"
+        matches <- mapM enumMatch cs
+        return $ LamE [VarP vVar] $ CaseE (VarE vVar) matches
+      Just [RecC _ ifields] -> mkRecordBuilder ifields
+      Just [NormalC icon [(_bang, inner)]] -> do
+        xVar <- newName "x"
+        wrapped <- conP icon [varP xVar]
+        body <- [| $(mkValueBuilder inner) $(varE xVar) |]
+        return $ LamE [wrapped] body
+      _ -> fail $ "Unsupported output field type: " ++ show n
+  _ -> fail $ "Unsupported output field type: " ++ show ty
+  where
+    enumMatch c = do
+      let cn = conName c
+      body <- [| String $(litE $ stringL $ snakeName cn) |]
+      pat <- conP cn []
+      return $ Match pat (NormalB body) []
+
+-- Serializer for a record: an object with one entry per field, in
+-- declaration order, omitting 'Maybe' fields that are 'Nothing'.
+mkRecordBuilder :: [(Name, Bang, Type)] -> Q Exp
+mkRecordBuilder fields = do
+  rVar <- newName "r"
+  fieldExps <- mapM (fieldPairs rVar) fields
+  body <- [| object (concat $(return $ ListE fieldExps)) |]
+  return $ LamE [VarP rVar] body
+  where
+    fieldPairs rVar (fieldName, _, fieldType) = do
+      let (isOptional, innerType) = unwrapMaybe fieldType
+      let fname = litE $ stringL $ nameBase fieldName
+      if isOptional
+        then [| omitNothing $fname $(mkValueBuilder innerType) ($(varE fieldName) $(varE rVar)) |]
+        else [| [ $fname .= $(mkValueBuilder innerType) ($(varE fieldName) $(varE rVar)) ] |]
+
+-- The output type must (possibly through single-constructor wrappers)
+-- resolve to a record: outputSchema is an object schema per the spec.
+requireOutputRecord :: Name -> Q ()
+requireOutputRecord n = do
+  cons <- reifyCons n
+  case cons of
+    Just [RecC _ (_:_)] -> pure ()
+    Just [NormalC _ [(_bang, ConT inner)]] -> requireOutputRecord inner
+    _ -> fail $ "Output type " ++ show n
+           ++ " must be a record (outputSchema is an object schema)"
+
+-------------------------------------------------------------------------------
 -- Argument decoding for a constructor
 -------------------------------------------------------------------------------
 
-data ArgStyle = ToolArgs | PromptArgs
+data ArgStyle = ToolArgs | ToolArgsOutput Exp | PromptArgs
 
 -- Build a decoder expression of type @Either Error <ConType>@ reading from
 -- the in-scope arguments map bound to 'argsName'.
@@ -251,12 +315,12 @@ mkFieldsDecoder style con fields =
       let (isOptional, innerType) = unwrapMaybe fieldType
       let fname = litE $ stringL $ nameBase fieldName
       case style of
-        ToolArgs
-          | isOptional -> [| optionalArg $fname $(mkValueParser innerType) $(varE argsName) |]
-          | otherwise  -> [| requiredArg $fname $(mkValueParser innerType) $(varE argsName) |]
         PromptArgs
           | isOptional -> [| optionalTextArg $fname $(mkTextParser innerType) $(varE argsName) |]
           | otherwise  -> [| requiredTextArg $fname $(mkTextParser innerType) $(varE argsName) |]
+        _ -- tool styles share the Value-based argument decoding
+          | isOptional -> [| optionalArg $fname $(mkValueParser innerType) $(varE argsName) |]
+          | otherwise  -> [| requiredArg $fname $(mkValueParser innerType) $(varE argsName) |]
 
 -------------------------------------------------------------------------------
 -- Schema generation
@@ -377,6 +441,12 @@ mkDispatchCase style handlerName con = do
            Right v  -> do
              r <- $(varE handlerName) $(varE ctxName) v
              pure (Right (toToolResult r)) |]
+    ToolArgsOutput builder ->
+      [| case $(return decoder) of
+           Left err -> pure (Left err)
+           Right v  -> do
+             r <- $(varE handlerName) $(varE ctxName) v
+             pure (Right (resolveToolOutput $(return builder) r)) |]
     PromptArgs ->
       [| case $(return decoder) of
            Left err -> pure (Left err)
@@ -546,25 +616,8 @@ mkSegmentsDecoder segsName con fields =
 --
 -- > $(deriveToolHandlerWithDescription ''MyTool 'handleTool [("Constructor", "Description")])
 deriveToolHandlerWithDescription :: Name -> Name -> [(String, String)] -> Q Exp
-deriveToolHandlerWithDescription typeName handlerName descriptions = do
-  cons <- reifyCons typeName
-  case cons of
-    Just constructors -> do
-      -- Generate tool definitions
-      toolDefs <- traverse (mkToolDefWithDescription descriptions) constructors
-
-      listHandlerExp <- [| \_ctx -> pure $(return $ ListE toolDefs) |]
-
-      -- Generate call handler with cases
-      cases <- traverse (mkDispatchCase ToolArgs handlerName) constructors
-      defaultCase <- [| pure $ Left $ UnknownTool $ "Unknown tool: " <> $(varE argNameN) |]
-      let defaultMatch = Match WildP (NormalB defaultCase) []
-      let callHandlerExp = LamE [VarP ctxName, VarP argNameN, VarP argsName] $
-            CaseE (AppE (VarE 'T.unpack) (VarE argNameN))
-              (map clauseToMatch cases ++ [defaultMatch])
-
-      return $ TupE [Just listHandlerExp, Just callHandlerExp]
-    Nothing -> fail $ "deriveToolHandlerWithDescription: " ++ show typeName ++ " is not a data type"
+deriveToolHandlerWithDescription typeName handlerName descriptions =
+  deriveToolHandlerGeneric typeName handlerName descriptions Nothing
 
 -- | Derive tool handlers from a data type.
 -- Usage:
@@ -574,8 +627,58 @@ deriveToolHandler :: Name -> Name -> Q Exp
 deriveToolHandler typeName handlerName =
   deriveToolHandlerWithDescription typeName handlerName []
 
-mkToolDefWithDescription :: [(String, String)] -> Con -> Q Exp
-mkToolDefWithDescription descriptions con = do
+-- | Derive tool handlers with typed, structured output: the third name is a
+-- record type describing the tools' results. Its shape becomes the derived
+-- @outputSchema@ (same field rules as input derivation: primitives,
+-- 'Maybe', lists, all-nullary enums, nested records), and the handler
+-- returns @'ToolOutput' \<output\>@, whose typed values the derivation
+-- serializes into @structuredContent@ — guaranteed to match the schema.
+--
+-- > handleTool :: ClientContext -> MyTool -> IO (ToolOutput WeatherReport)
+-- > $(deriveToolHandlerWithOutput ''MyTool 'handleTool ''WeatherReport)
+deriveToolHandlerWithOutput :: Name -> Name -> Name -> Q Exp
+deriveToolHandlerWithOutput typeName handlerName outputName =
+  deriveToolHandlerWithOutputDescription typeName handlerName outputName []
+
+-- | 'deriveToolHandlerWithOutput' with custom descriptions. The
+-- description list is shared with the output type: entries matching output
+-- field names describe the @outputSchema@ properties.
+deriveToolHandlerWithOutputDescription :: Name -> Name -> Name -> [(String, String)] -> Q Exp
+deriveToolHandlerWithOutputDescription typeName handlerName outputName descriptions = do
+  requireOutputRecord outputName
+  deriveToolHandlerGeneric typeName handlerName descriptions (Just outputName)
+
+deriveToolHandlerGeneric :: Name -> Name -> [(String, String)] -> Maybe Name -> Q Exp
+deriveToolHandlerGeneric typeName handlerName descriptions outputName = do
+  cons <- reifyCons typeName
+  case cons of
+    Just constructors -> do
+      -- The output type's schema and its matching serializer, when typed
+      -- output is requested
+      output <- traverse
+        (\o -> (,) <$> mkSchemaShape descriptions (ConT o)
+                   <*> mkValueBuilder (ConT o))
+        outputName
+
+      -- Generate tool definitions
+      toolDefs <- traverse (mkToolDefWithDescription descriptions (fst <$> output)) constructors
+
+      listHandlerExp <- [| \_ctx -> pure $(return $ ListE toolDefs) |]
+
+      -- Generate call handler with cases
+      let style = maybe ToolArgs (ToolArgsOutput . snd) output
+      cases <- traverse (mkDispatchCase style handlerName) constructors
+      defaultCase <- [| pure $ Left $ UnknownTool $ "Unknown tool: " <> $(varE argNameN) |]
+      let defaultMatch = Match WildP (NormalB defaultCase) []
+      let callHandlerExp = LamE [VarP ctxName, VarP argNameN, VarP argsName] $
+            CaseE (AppE (VarE 'T.unpack) (VarE argNameN))
+              (map clauseToMatch cases ++ [defaultMatch])
+
+      return $ TupE [Just listHandlerExp, Just callHandlerExp]
+    Nothing -> fail $ "deriveToolHandler: " ++ show typeName ++ " is not a data type"
+
+mkToolDefWithDescription :: [(String, String)] -> Maybe Exp -> Con -> Q Exp
+mkToolDefWithDescription descriptions outputShape con = do
   let name = conName con
   let sname = snakeName name
   let description = descriptionFor descriptions (nameBase name) (nameBase name)
@@ -585,6 +688,8 @@ mkToolDefWithDescription descriptions con = do
       { toolDefinitionName = $(litE $ stringL sname)
       , toolDefinitionDescription = $(litE $ stringL description)
       , toolDefinitionInputSchema = Schema Nothing $(return shapeExp)
-      , toolDefinitionOutputSchema = Nothing
+      , toolDefinitionOutputSchema = $(case outputShape of
+          Just shape -> [| Just (Schema Nothing $(return shape)) |]
+          Nothing    -> [| Nothing |])
       , toolDefinitionTitle = Nothing
       } |]

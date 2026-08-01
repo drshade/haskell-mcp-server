@@ -13,6 +13,7 @@ module MCP.Server.Types
   , toolResult
   , toolError
   , ToToolResult(..)
+  , ToolOutput(..)
   , PromptResult(..)
   , ToPromptResult(..)
   , PromptMessage(..)
@@ -272,6 +273,25 @@ instance ToToolResult Text where
 
 firstJust :: [Maybe a] -> Maybe a
 firstJust = listToMaybe . catMaybes
+
+-- | What a tool handler derived with
+-- 'MCP.Server.Derive.deriveToolHandlerWithOutput' returns: a typed value
+-- that the derivation serializes into @structuredContent@ (matching the
+-- derived @outputSchema@), or one of the escape hatches.
+data ToolOutput o
+  = ToolOutput o
+    -- ^ A structured value. Per the spec's recommendation, the serialized
+    -- JSON is also returned as a text content block for clients that
+    -- predate structured output.
+  | ToolOutputWith [Content] o
+    -- ^ A structured value with caller-supplied content blocks (no
+    -- automatic text block).
+  | ToolOutputError Text
+    -- ^ An execution failure, reported with @isError@ (see 'toolError').
+  | ToolOutputRaw ToolResult
+    -- ^ Full control: return this 'ToolResult' as-is, with no structured
+    -- content implied.
+  deriving (Show, Eq)
 
 -- | The full result of a prompts/get request: an optional description and
 -- a conversation of one or more messages.

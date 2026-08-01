@@ -6,7 +6,8 @@ import           Data.Text  (Text)
 import qualified Data.Text  as T
 import           MCP.Server (ClientContext, anonymousContext, Content (..), MessageRole (..),
                              PromptMessage (..), PromptResult (..),
-                             ResourceContent (..), ToolResult, toolError,
+                             ResourceContent (..), ToolOutput (..),
+                             ToolResult, toolError,
                              toolResult)
 import           Network.URI (URI)
 
@@ -178,6 +179,47 @@ handleTemplResource _ uri (MemberProfile uid) =
     pure $ ResourceText uri "text/plain" ("Profile of " <> uid)
 handleTemplResource _ uri (OrderItem oid item) =
     pure $ ResourceText uri "text/plain" ("Order " <> T.pack (show oid) <> " item " <> item)
+
+-- Types exercising derived structured output (ADR 0005)
+data Wind = Wind { windSpeedKph :: Double, windGusting :: Bool }
+    deriving (Show, Eq)
+
+data Sky = SkyClear | SkyCloudy | SkyRaining
+    deriving (Show, Eq)
+
+data WeatherReport = WeatherReport
+    { wrTemperature :: Int
+    , wrSky         :: Sky
+    , wrWind        :: Wind
+    , wrAlerts      :: [Text]
+    , wrHumidity    :: Maybe Int
+    } deriving (Show, Eq)
+
+data WeatherTool
+    = GetWeather { wtCity :: Text }
+    | BrokenStation { wtStation :: Text }
+    | CustomReport { wtRegion :: Text }
+    | PlainForecast { wtNote :: Text }
+    deriving (Show, Eq)
+
+sampleReport :: Text -> Maybe Int -> WeatherReport
+sampleReport place humidity = WeatherReport
+    { wrTemperature = 21
+    , wrSky = SkyCloudy
+    , wrWind = Wind 12.5 False
+    , wrAlerts = ["wind advisory for " <> place]
+    , wrHumidity = humidity
+    }
+
+handleWeatherTool :: ClientContext -> WeatherTool -> IO (ToolOutput WeatherReport)
+handleWeatherTool _ (GetWeather c) =
+    pure $ ToolOutput (sampleReport c (Just 60))
+handleWeatherTool _ (BrokenStation s) =
+    pure $ ToolOutputError ("station offline: " <> s)
+handleWeatherTool _ (CustomReport r) =
+    pure $ ToolOutputWith [ContentText ("Report for " <> r)] (sampleReport r Nothing)
+handleWeatherTool _ (PlainForecast n) =
+    pure $ ToolOutputRaw (toolResult [ContentText n])
 
 -- A prompt whose handler produces a multi-message conversation
 data ConvPrompt = Conversation { topic :: Text }

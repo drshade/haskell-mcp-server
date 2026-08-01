@@ -139,6 +139,33 @@ handleTool _ (Search q _ _ _)
 Prompt handlers can likewise return a `PromptResult` with a description and
 a multi-message conversation (user and assistant roles).
 
+#### Derived Output Schemas
+
+Tools can be typed on the way out too: give the derivation a result record
+and it derives the tool's `outputSchema` (same field rules as inputs —
+primitives, `Maybe`, lists, enums, nested records) and serializes your typed
+values into `structuredContent`, guaranteed to match the schema. Per the
+spec's recommendation, the JSON is also returned as a text content block for
+clients that predate structured output:
+
+```haskell
+data WeatherReport = WeatherReport
+    { temperature :: Int
+    , sky         :: Sky          -- enum
+    , alerts      :: [Text]
+    , humidity    :: Maybe Int    -- optional, omitted when Nothing
+    }
+
+handleTool :: ClientContext -> MyTool -> IO (ToolOutput WeatherReport)
+handleTool _ (GetWeather city) = pure $ ToolOutput (lookupWeather city)
+handleTool _ (BrokenTool _)    = pure $ ToolOutputError "sensor offline"
+
+tools = Just $(deriveToolHandlerWithOutput ''MyTool 'handleTool ''WeatherReport)
+```
+
+`ToolOutputWith` supplies custom content blocks alongside the structured
+value; `ToolOutputRaw` is the escape hatch back to a plain `ToolResult`.
+
 #### Nested Parameter Types
 
 You can nest parameter types with automatic unwrapping:
