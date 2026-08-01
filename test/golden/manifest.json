@@ -58,6 +58,11 @@
       "notifications": false
     },
     {
+      "name": "legacy/tools-call-structured",
+      "handlers": "extended",
+      "notifications": false
+    },
+    {
       "name": "legacy/tools-call-unknown",
       "handlers": "base",
       "notifications": false
@@ -65,6 +70,11 @@
     {
       "name": "legacy/tools-list",
       "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "legacy/tools-list-extended",
+      "handlers": "extended",
       "notifications": false
     },
     {
@@ -110,6 +120,11 @@
     {
       "name": "modern/tools-call-echo",
       "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "modern/tools-call-structured",
+      "handlers": "extended",
       "notifications": false
     },
     {

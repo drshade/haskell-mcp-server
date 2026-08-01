@@ -1,0 +1,1 @@
+{"id":32,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"Golden Server","version":"1.0.0"}},"content":[{"text":"{\"echoedLength\":6,\"echoedText\":\"golden\"}","type":"text"}],"resultType":"complete","structuredContent":{"echoedLength":6,"echoedText":"golden"}}}

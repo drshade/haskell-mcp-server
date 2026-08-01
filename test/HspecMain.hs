@@ -8,6 +8,7 @@ import qualified Spec.BasicDerivation
 import qualified Spec.SchemaValidation
 import qualified Spec.AdvancedDerivation
 import qualified Spec.UnicodeHandling
+import qualified Spec.DerivedOutput
 import qualified Spec.GoldenWire
 import qualified Spec.ModernEra
 import qualified Spec.ProtocolVersionNegotiation
@@ -24,6 +25,7 @@ main = hspec $ do
     Spec.SchemaValidation.spec
     Spec.AdvancedDerivation.spec
     Spec.UnicodeHandling.spec
+    Spec.DerivedOutput.spec
     Spec.GoldenWire.spec
     Spec.ModernEra.spec
     Spec.ProtocolVersionNegotiation.spec
