@@ -65,6 +65,12 @@ spec = describe "Definition metadata" $ do
           c = ContentAnnotated anns (ContentText "hello")
       decode (encode c) `shouldBe` Just c
 
+    it "round-trips resource links carrying icons" $ do
+      let def = (mkResourceDefinition "resource://x" "x")
+            { resourceDefinitionIcons = [Icon "https://example.com/x.png" (Just "image/png") ["48x48"]] }
+          c = ContentResourceLink def
+      decode (encode c) `shouldBe` Just c
+
   describe "Options-based derivation" $ do
     it "carries description, title, icons and annotations on the definition" $ do
       defs <- fst annotatedToolHandlers anonCtx

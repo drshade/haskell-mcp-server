@@ -314,6 +314,12 @@ instance ToJSON Icon where
     ++ maybe [] (\m -> ["mimeType" .= m]) (iconMimeType i)
     ++ (if null (iconSizes i) then [] else ["sizes" .= iconSizes i])
 
+instance FromJSON Icon where
+  parseJSON = withObject "Icon" $ \o -> Icon
+    <$> o .: "src"
+    <*> o .:? "mimeType"
+    <*> o .:? "sizes" .!= []
+
 -- | Prompt message
 data PromptMessage = PromptMessage
   { promptMessageRole    :: MessageRole
@@ -587,7 +593,7 @@ instance FromJSON ResourceDefinition where
     <*> o .:? "description"
     <*> o .:? "mimeType"
     <*> o .:? "title"
-    <*> pure []
+    <*> o .:? "icons" .!= []
 
 -- | Resource template definition: a parameterized resource identified by an
 -- RFC 6570 URI template.
