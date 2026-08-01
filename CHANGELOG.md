@@ -1,10 +1,13 @@
 # Revision history for mcp-server
 
-## 0.3.0.0 - ???
+## 0.2.0.1 - ???
 
-(The unreleased 0.2.1.0 line below is folded into this release: definition
-metadata extends exported datatypes, which is a major change under the PVP,
-so the pending version becomes 0.3.0.0.)
+(Supersedes 0.2.0.0, which is **deprecated on Hackage**: it was published
+hours before this line landed and was never adopted, so rather than
+burning a major version on a release nobody used, 0.2.0.1 replaces it —
+including changes that would ordinarily demand a major bump. Anyone
+explicitly pinning the deprecated 0.2.0.0 should move here. The unreleased
+0.2.1.0 line below is folded in as well.)
 
 * Definition metadata (ADR 0006):
     * `ToolAnnotations` — `readOnlyHint`/`destructiveHint`/`idempotentHint`/

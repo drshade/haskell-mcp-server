@@ -1,6 +1,6 @@
 # ADR 0005: Derived output schemas and structured content
 
-- **Status**: Landed (0.3.0.0, née 0.2.1.0 — see CHANGELOG)
+- **Status**: Landed (0.2.0.1)
 - **Date**: 2026-08-01
 - **Depends on**: —
 

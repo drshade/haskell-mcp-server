@@ -8,19 +8,21 @@ value, not commitment.
 **Current state**: 0.2.0.0 is on Hackage (typed core, dual-era protocol
 support for 2024-11-05…2025-11-25 via `initialize` and stateless
 2026-07-28, resource templates, completions, change notifications with
-`subscriptions/listen`). 0.3.0.0 sits merged-but-unreleased (WAI
-application export, conformance corpus, and Batch 1: derived output
-schemas, definition metadata — the metadata datatype extensions made the
-pending line a major bump), soaking until released.
+`subscriptions/listen`) but is deprecated there in favor of the pending
+line: 0.2.0.1 sits merged-but-unreleased (WAI application export,
+conformance corpus, and Batch 1: derived output schemas, definition
+metadata), soaking until released. 0.2.0.1 knowingly supersedes the
+never-adopted 0.2.0.0 in place rather than burning a major version.
 
 ## Batch 1 — complete the typed core *(landed)*
 
-Both landed in the pending 0.3.0.0.
+Both landed in the pending 0.2.0.1.
 
 1. [ADR_0005 — Derived output schemas and structured content](ADR_0005_derived_output_schemas.md) — **Landed**.
 2. [ADR_0006 — Tool annotations, icons, content annotations](ADR_0006_definition_metadata.md) — **Landed**
-   (the definition-datatype extensions turned the pending release into a
-   major bump under strict PVP, contrary to the ADR's minor-bump guess).
+   (the definition-datatype extensions are breaking; they ship anyway in
+   0.2.0.1 because the only affected release, 0.2.0.0, is deprecated with
+   zero adopters).
 
 ## Batch 2 — long-running tools
 
