@@ -90,6 +90,7 @@ library
   -- Other library packages from which modules are imported.
   build-depends:
     aeson >=2 && <3,
+    async >=2.2 && <2.3,
     base >=4.18 && <4.23,
     base64-bytestring >=1.0 && <1.3,
     bytestring >=0.10 && <0.13,
@@ -180,6 +181,7 @@ test-suite haskell-mcp-server-test
   other-modules:
     Spec.AdvancedDerivation
     Spec.BasicDerivation
+    Spec.Cancellation
     Spec.DefinitionMetadata
     Spec.DerivedOutput
     Spec.GoldenWire
@@ -209,6 +211,7 @@ test-suite haskell-mcp-server-test
   build-depends:
     QuickCheck,
     aeson,
+    async,
     base,
     bytestring,
     containers,

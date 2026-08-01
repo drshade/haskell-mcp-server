@@ -44,7 +44,7 @@ Filename `ADR_XXXX_short_slug.md`, numbered sequentially. Body:
 | [0005](ADR_0005_derived_output_schemas.md) | Derived output schemas and structured content | Proposed |
 | [0006](ADR_0006_definition_metadata.md) | Tool annotations, icons, content annotations | Proposed |
 | [0007](ADR_0007_progress_notifications.md) | Progress notifications and per-request SSE | Proposed |
-| [0008](ADR_0008_request_cancellation.md) | Cancellation of in-flight requests | Proposed |
+| [0008](ADR_0008_request_cancellation.md) | Cancellation of in-flight requests | Landed (0.2.0.1) |
 | [0009](ADR_0009_mrtr_input_required.md) | MRTR: input_required results (elicitation) | Proposed |
 | [0010](ADR_0010_oauth_resource_metadata.md) | OAuth protected-resource metadata | Proposed |
 | [0011](ADR_0011_protocol_completeness.md) | Pagination and the extensions capability | Proposed |

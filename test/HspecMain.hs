@@ -7,6 +7,7 @@ import qualified Spec.JSONConversion
 import qualified Spec.BasicDerivation
 import qualified Spec.SchemaValidation
 import qualified Spec.AdvancedDerivation
+import qualified Spec.Cancellation
 import qualified Spec.UnicodeHandling
 import qualified Spec.DefinitionMetadata
 import qualified Spec.DerivedOutput
@@ -26,6 +27,7 @@ main = hspec $ do
     Spec.BasicDerivation.spec
     Spec.SchemaValidation.spec
     Spec.AdvancedDerivation.spec
+    Spec.Cancellation.spec
     Spec.UnicodeHandling.spec
     Spec.DefinitionMetadata.spec
     Spec.DerivedOutput.spec

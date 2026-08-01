@@ -17,8 +17,12 @@ module MCP.Server.Transport.Http
   , decodeSentinel
   ) where
 
+import           Control.Concurrent       (threadDelay)
+import           Control.Concurrent.Async (race)
+import           Control.Concurrent.MVar  (newMVar, withMVar)
 import           Control.Concurrent.STM   (atomically, check, orElse,
                                            readTChan, readTVar, registerDelay)
+import           Control.Exception        (uninterruptibleMask_)
 import           Control.Monad            (forever, when)
 import           Data.Aeson
 import qualified Data.Aeson.KeyMap        as KM
@@ -122,6 +126,13 @@ sseHeaders =
 
 
 -- | Transport-specific implementation for HTTP
+--
+-- A client closing the connection is its cancellation signal: for SSE
+-- responses the handler task is cancelled once the disconnect surfaces (at
+-- most one keep-alive interval later), and for single-JSON responses Warp
+-- tears the request thread down. Cancellation reaches handler code as an
+-- asynchronous exception: handlers that acquire resources should release
+-- them with 'Control.Exception.bracket'.
 transportRunHttp :: HttpConfig -> McpServerInfo -> McpServerHandlers -> IO ()
 transportRunHttp config serverInfo handlers = do
   let settings = Warp.setHost (fromString $ httpHost config) $
@@ -445,12 +456,21 @@ handleSubscriptionsListen config src body respond =
 -- | Serve a request that opted into request-scoped notifications: the
 -- response is an SSE stream on which progress and client-log notifications
 -- flow, followed by the final JSON-RPC response.
+--
+-- The handler runs in its own task, raced against a keep-alive writer that
+-- doubles as the disconnect detector: when the client closes the stream the
+-- next keep-alive write throws, the race cancels the handler task, and
+-- nothing further is produced for the request.
 handleStreamingRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
 handleStreamingRequest config serverInfo handlers ctx body respond =
   respond $ Wai.responseStream status200 sseHeaders $ \write flush -> do
-    let sendEvent v = do
-          write $ B.lazyByteString $ "data: " <> encode v <> "\n\n"
+    -- One writer at a time, and a cancellation arriving mid-write cannot
+    -- split an event in half
+    streamLock <- newMVar ()
+    let sendChunk b = withMVar streamLock $ \_ -> uninterruptibleMask_ $ do
+          write b
           flush
+        sendEvent v = sendChunk $ B.lazyByteString $ "data: " <> encode v <> "\n\n"
         emit n = sendEvent (toJSON (n :: JsonRpcNotification))
     case eitherDecode body of
       Left err -> do
@@ -464,11 +484,21 @@ handleStreamingRequest config serverInfo handlers ctx body respond =
             { errorCode = -32600, errorMessage = "Invalid Request", errorData = Nothing }
         Right message -> do
           logVerbose config $ "Processing streaming HTTP message: " ++ show (getMessageSummary message)
-          maybeResponse <- handleMcpMessage serverInfo (httpCacheHints config)
-            (httpNotifSupport config) emit handlers ctx message
-          case maybeResponse of
-            Just responseMsg -> sendEvent (encodeJsonRpcMessage responseMsg)
-            Nothing          -> pure ()
+          -- 5s: short enough that an abandoned handler is cancelled
+          -- promptly (a write to a closed connection is what surfaces the
+          -- disconnect), long enough to stay negligible on the wire
+          let keepAlive :: IO ()
+              keepAlive = forever $ do
+                threadDelay 5000000
+                sendChunk $ B.byteString ": keep-alive\n\n"
+          outcome <- race
+            (handleMcpMessage serverInfo (httpCacheHints config)
+              (httpNotifSupport config) emit handlers ctx message)
+            keepAlive
+          case outcome of
+            Left (Just responseMsg) -> sendEvent (encodeJsonRpcMessage responseMsg)
+            Left Nothing            -> pure ()
+            Right ()                -> pure ()
 
 -- | Handle JSON-RPC request from HTTP body
 handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Bool -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
