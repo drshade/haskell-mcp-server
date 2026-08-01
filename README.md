@@ -17,6 +17,7 @@ A fully-featured Haskell library for building [Model Context Protocol (MCP)](htt
 - ✅ **Resource Templates**: Parameterized resources via URI templates
 - ✅ **Tools**: Model-controlled callable functions
 - ✅ **Completions**: Argument autocompletion for prompts and templates
+- ✅ **Change Notifications**: `listChanged`/resource-update pushes, via `subscriptions/listen` (2026-07-28) or legacy stdio delivery
 - ✅ **Initialization Flow**: Complete protocol lifecycle with version negotiation
 - ✅ **Error Handling**: Comprehensive error types and JSON-RPC error responses
 
@@ -35,6 +36,7 @@ Create a simple module, such as this example below:
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
+import Data.Text (Text)
 import MCP.Server
 import MCP.Server.Derive
 
@@ -57,6 +59,11 @@ handleTool :: ClientContext -> MyTool -> IO Content
 handleTool _ (Search query) = pure $ ContentText $ "Search results for " <> query
 handleTool _ (Order item) = pure $ ContentText $ "Ordered " <> item
 
+-- Template Haskell staging: this empty splice ends the declaration group,
+-- so the derive splices below can see the types above. (Alternatively,
+-- declare the types in a separate module, as the examples/ do.)
+$(pure [])
+
 -- Derive handlers automatically
 main :: IO ()
 main = runMcpServerStdio serverInfo handlers
@@ -66,7 +73,10 @@ main = runMcpServerStdio serverInfo handlers
       , serverVersion = "1.0.0"
       , serverInstructions = "A sample MCP server"
       }
-    handlers = McpServerHandlers
+    -- Start from 'noHandlers' and record-update the features you provide:
+    -- constructing McpServerHandlers directly breaks (at runtime!) when a
+    -- field is missed, and the library grows new handler slots over time.
+    handlers = noHandlers
       { prompts = Just $(derivePromptHandler ''MyPrompt 'handlePrompt)
       , resources = Just $(deriveResourceHandler ''MyResource 'handleResource)
       , tools = Just $(deriveToolHandler ''MyTool 'handleTool)
@@ -222,7 +232,7 @@ descriptions =
   ]
 
 -- Use in derivation
-handlers = McpServerHandlers
+handlers = noHandlers
   { prompts = Just $(derivePromptHandlerWithDescription ''MyPrompt 'handlePrompt descriptions)
   , tools = Just $(deriveToolHandlerWithDescription ''MyTool 'handleTool descriptions)
   , resources = Just $(deriveResourceHandlerWithDescription ''MyResource 'handleResource descriptions)
@@ -246,10 +256,8 @@ promptGetHandler :: ClientContext -> PromptName -> Map Text Text -> IO (Either E
 main :: IO ()
 main = runMcpServerStdio serverInfo handlers
   where
-    handlers = McpServerHandlers
+    handlers = noHandlers
       { prompts = Just (promptListHandler, promptGetHandler)
-      , resources = Nothing  -- Not supported
-      , tools = Nothing      -- Not supported
       }
 ```
 
@@ -277,12 +285,12 @@ possible:
   long-lived SSE response over HTTP) and receive only the notification types
   they opted into, tagged with their subscription id — including
   `notifications/resources/updated` for watched URIs.
-- **Legacy stdio clients** receive spontaneous untagged notifications after
-  `initialize`.
+- **Legacy stdio clients** receive spontaneous untagged notifications once
+  their `notifications/initialized` arrives (the lifecycle's ready signal).
 - **Legacy HTTP clients** have no delivery channel (this library does not
   offer the deprecated GET SSE stream), so nothing is advertised to them.
 
-## HTTP Transport (NEW!)
+## HTTP Transport
 
 The library supports the MCP Streamable HTTP transport. Compile your
 executable with `ghc-options: -threaded` — Warp requires the threaded runtime:
@@ -326,13 +334,16 @@ application; the library only threads the identity through:
 
 **Features:**
 - CORS enabled for web clients
-- POST `/mcp` for JSON-RPC messages (GET returns 405 — this library does not
-  offer server-initiated SSE streams)
+- POST `/mcp` for JSON-RPC messages (GET returns 405 — server-to-client
+  notifications flow over the `subscriptions/listen` POST response stream,
+  not a standalone GET stream)
 - Dual-era protocol support: legacy revisions (`2024-11-05`–`2025-11-25`)
   negotiate via `initialize`; the stateless `2026-07-28` revision declares its
   version per request in `_meta`, with full request-metadata header
   validation (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` including the
   base64 sentinel encoding)
+- Change notifications as long-lived SSE streams via `httpNotifications`
+  (see [Change Notifications](#change-notifications))
 - Optional pluggable bearer-token authentication via `httpAuthorize`
 - Origin validation via `httpAllowedOrigins`
 - Cacheability hints for modern list/read results via `httpCacheHints`
@@ -342,7 +353,7 @@ application; the library only threads the identity through:
 The library includes several examples:
 
 - **`examples/Simple/`**: Basic key-value store using Template Haskell derivation (STDIO)
-- **`examples/Complete/`**: Full-featured example with prompts, resources, and tools (STDIO)
+- **`examples/Complete/`**: Full-featured example with prompts, resources, a resource template, tools (enum/nested/list arguments, `isError`), and completions (STDIO)
 - **`examples/HttpSimple/`**: HTTP version of the simple key-value store
 
 ## Docker Usage
@@ -377,7 +388,8 @@ And then configure Claude by editing `claude_desktop_config.json`:
 
 ## Documentation
 
-- [MCP Specification](https://modelcontextprotocol.io/specification/2025-11-25/)
+- [MCP Specification (2026-07-28)](https://modelcontextprotocol.io/specification/2026-07-28/)
+- [MCP Specification (2025-11-25, newest legacy revision)](https://modelcontextprotocol.io/specification/2025-11-25/)
 - [API Documentation](https://hackage.haskell.org/package/mcp-server)
 - [Examples](examples/)
 
