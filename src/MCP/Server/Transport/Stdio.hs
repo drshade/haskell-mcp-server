@@ -10,7 +10,7 @@ module MCP.Server.Transport.Stdio
   ) where
 
 import           Control.Concurrent     (ThreadId, forkIO, killThread)
-import           Control.Concurrent.Async (Async, async, cancel)
+import           Control.Concurrent.Async (Async, async, cancel, waitCatch)
 import           Control.Concurrent.MVar (modifyMVar_, newEmptyMVar, newMVar,
                                           putMVar, readMVar, takeMVar,
                                           withMVar)
@@ -232,8 +232,14 @@ transportRunStdioWithConfig config serverInfo handlers = do
       eof <- hIsEOF stdin
       if eof
         then do
+          -- EOF means no more input, not "abandon outstanding work": per the
+          -- lifecycle spec the client closes stdin and then waits for the
+          -- server to exit, so drain in-flight requests (their responses are
+          -- still wanted) before tearing down the open-ended streams.
+          -- waitCatch, not wait: a handler that threw must not abort the
+          -- shutdown of everything else.
           inflight <- readMVar inflightVar
-          mapM_ (cancel . snd) inflight
+          mapM_ (waitCatch . snd) inflight
           closeAllSubscriptions
           logLine "stdin closed - shutting down"
         else do

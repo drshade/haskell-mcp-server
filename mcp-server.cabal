@@ -15,7 +15,7 @@ name: mcp-server
 -- PVP summary:     +-+------- breaking API changes
 --                  | | +----- non-breaking API additions
 --                  | | | +--- code changes with no API change
-version: 0.2.0.1
+version: 0.2.0.2
 -- A short (one-line) description of the package.
 synopsis: Library for building Model Context Protocol (MCP) servers
 -- A longer description of the package.
@@ -185,6 +185,8 @@ test-suite haskell-mcp-server-test
     Spec.DefinitionMetadata
     Spec.DerivedOutput
     Spec.GoldenWire
+    Spec.HandlerExceptions
+    Spec.HttpTransport
     Spec.JSONConversion
     Spec.ModernEra
     Spec.Progress
@@ -217,6 +219,7 @@ test-suite haskell-mcp-server-test
     containers,
     directory,
     hspec,
+    http-types,
     mcp-server,
     network-uri,
     stm,

@@ -1,5 +1,28 @@
 # Revision history for mcp-server
 
+## 0.2.0.2 - ???
+
+* stdio: in-flight requests are drained at stdin EOF instead of being
+  cancelled. Since 0.2.0.1 made stdio requests concurrent, a client that
+  wrote its requests and closed stdin straight away (scripts, `echo ... |
+  server`, conformance replays) lost the responses to whatever was still
+  running when EOF arrived — most visibly the last request in the batch.
+  Per the lifecycle spec the client closes stdin and then waits for the
+  server to exit, so the server now finishes outstanding work and writes
+  those responses before shutting down. Subscription streams are still
+  closed at EOF as before, and `notifications/cancelled` still interrupts
+  a running request.
+* A handler that throws an exception (rather than returning an error
+  value such as `toolError`) now yields a `-32603` internal-error response
+  for its request id, on both transports and in both protocol eras.
+  Previously the exception escaped the transport: on stdio the request's
+  task died silently and the client waited forever for that id; on HTTP
+  Warp answered a bare text/plain 500 (single-JSON responses) or dropped
+  the connection with an empty body (SSE responses). The exception's first
+  line is the error message; the full rendering (including any call
+  stack) is logged to stderr. Asynchronous exceptions are rethrown
+  untouched, so cancellation is unaffected.
+
 ## 0.2.0.1 - 2026-08-01
 
 (Supersedes 0.2.0.0, which is **deprecated on Hackage**: it was published

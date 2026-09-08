@@ -30,6 +30,9 @@ module MCP.Server.Handlers
   , errorMessageFromMcpError
   ) where
 
+import           Control.Exception      (SomeAsyncException, SomeException,
+                                         displayException, fromException,
+                                         throwIO, try)
 import           Control.Monad          (when)
 import           Data.Aeson
 import qualified Data.Aeson.Key         as Key
@@ -123,6 +126,31 @@ cacheableMethods =
   , "resources/templates/list"
   ]
 
+-- | Answer a request whose handler threw with a @-32603@ internal error
+-- instead of letting the exception escape the transport, where it would
+-- silently kill the request's task (stdio) or surface as a bare HTTP 500
+-- (Warp) — either way the client never sees a response for that id.
+-- Asynchronous exceptions are rethrown untouched: they are how cancellation
+-- reaches a handler, and a cancelled request must produce no response.
+guardHandler :: RequestId -> IO JsonRpcResponse -> IO JsonRpcResponse
+guardHandler rid action = do
+  outcome <- try action
+  case outcome of
+    Right resp -> pure resp
+    Left (e :: SomeException) ->
+      case fromException e :: Maybe SomeAsyncException of
+        Just _  -> throwIO e
+        Nothing -> do
+          -- The full rendering (which on recent GHCs includes a call stack
+          -- for 'error') goes to stderr; the wire carries its first line.
+          let rendered = displayException e
+          hPutStrLn stderr $ "Handler threw for request " ++ show rid ++ ": " ++ rendered
+          pure $ makeErrorResponse rid $ JsonRpcError
+            { errorCode = -32603
+            , errorMessage = "Internal error: " <> T.pack (takeWhile (/= '\n') rendered)
+            , errorData = Nothing
+            }
+
 -- | Stamp the modern-revision result envelope onto a successful response:
 -- @resultType: \"complete\"@, the server's identity in result @_meta@, and
 -- (for cacheable methods) @ttlMs@ and @cacheScope@. Error responses and
@@ -187,7 +215,7 @@ handleMcpMessage serverInfo hints notifSupport emit handlers ctx0 (JsonRpcMessag
             , reportProgress = progressReporter emit params
             , logToClient = clientLogger emit params
             }
-      response <- case requestMethod req of
+      response <- guardHandler (requestId req) $ case requestMethod req of
         -- Era purity: the modern revision has neither initialize (nothing to
         -- negotiate statelessly) nor ping (removed) — a request declaring a
         -- modern revision must be served "according to this revision", so
