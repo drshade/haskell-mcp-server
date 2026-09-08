@@ -5,14 +5,18 @@ Where mcp-server is headed, as an ordering over the open
 batched (no release per feature), and the order reflects dependency and
 value, not commitment.
 
-**Current state**: 0.2.0.1 is released (2026-08-01), superseding the
-deprecated, never-adopted 0.2.0.0 in place rather than burning a major
-version. On top of 0.2.0.0's typed core and dual-era protocol support
-(2024-11-05…2025-11-25 via `initialize`, stateless 2026-07-28), it adds
-the WAI application export, the conformance corpus, Batch 1 (derived
-output schemas, definition metadata) and Batch 2 (progress
+**Current state**: 0.2.0.2 is released (2026-09-08), a bug-fix release
+on top of 0.2.0.1: stdio drains in-flight requests at EOF instead of
+cancelling them, and a handler that throws now yields a `-32603`
+response instead of no response at all. 0.2.0.1 (2026-08-01) superseded
+the deprecated, never-adopted 0.2.0.0 in place rather than burning a
+major version; on top of 0.2.0.0's typed core and dual-era protocol
+support (2024-11-05…2025-11-25 via `initialize`, stateless 2026-07-28),
+it added the WAI application export, the conformance corpus, Batch 1
+(derived output schemas, definition metadata) and Batch 2 (progress
 notifications, per-request SSE, client logging, request cancellation).
-Batch 3 onward is future work with no scheduled date.
+Batch 3 onward is future work with no scheduled date. Releases go out
+via the tag-triggered Hackage candidate workflow (see `RELEASING.md`).
 
 ## Batch 1 — complete the typed core *(landed)*
 
