@@ -13,6 +13,7 @@ import qualified Spec.DefinitionMetadata
 import qualified Spec.DerivedOutput
 import qualified Spec.GoldenWire
 import qualified Spec.HandlerExceptions
+import qualified Spec.HttpTransport
 import qualified Spec.ModernEra
 import qualified Spec.Progress
 import qualified Spec.ProtocolVersionNegotiation
@@ -34,6 +35,7 @@ main = hspec $ do
     Spec.DerivedOutput.spec
     Spec.GoldenWire.spec
     Spec.HandlerExceptions.spec
+    Spec.HttpTransport.spec
     Spec.ModernEra.spec
     Spec.Progress.spec
     Spec.ProtocolVersionNegotiation.spec

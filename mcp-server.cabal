@@ -186,6 +186,7 @@ test-suite haskell-mcp-server-test
     Spec.DerivedOutput
     Spec.GoldenWire
     Spec.HandlerExceptions
+    Spec.HttpTransport
     Spec.JSONConversion
     Spec.ModernEra
     Spec.Progress
@@ -218,6 +219,7 @@ test-suite haskell-mcp-server-test
     containers,
     directory,
     hspec,
+    http-types,
     mcp-server,
     network-uri,
     stm,
