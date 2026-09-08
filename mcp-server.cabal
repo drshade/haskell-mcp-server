@@ -185,6 +185,7 @@ test-suite haskell-mcp-server-test
     Spec.DefinitionMetadata
     Spec.DerivedOutput
     Spec.GoldenWire
+    Spec.HandlerExceptions
     Spec.JSONConversion
     Spec.ModernEra
     Spec.Progress
