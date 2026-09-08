@@ -1,6 +1,6 @@
 # Revision history for mcp-server
 
-## 0.2.0.2 - ???
+## 0.2.0.2 - 2026-09-08
 
 * stdio: in-flight requests are drained at stdin EOF instead of being
   cancelled. Since 0.2.0.1 made stdio requests concurrent, a client that
