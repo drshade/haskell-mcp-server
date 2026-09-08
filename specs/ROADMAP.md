@@ -16,7 +16,7 @@ it added the WAI application export, the conformance corpus, Batch 1
 (derived output schemas, definition metadata) and Batch 2 (progress
 notifications, per-request SSE, client logging, request cancellation).
 Batch 3 onward is future work with no scheduled date. Releases go out
-via the tag-triggered Hackage candidate workflow (see `RELEASING.md`).
+via the tag-triggered Hackage release workflow (see `RELEASING.md`).
 
 ## Batch 1 — complete the typed core *(landed)*
 

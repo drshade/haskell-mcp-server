@@ -1,13 +1,14 @@
-# Upload a release candidate to Hackage when a version tag is pushed.
+# Publish a release to Hackage when a version tag is pushed.
 #
-# Nothing here publishes. The package and its documentation land on the
-# candidate page (https://hackage.haskell.org/package/mcp-server/candidate),
-# and a maintainer promotes the candidate by hand from there. See
-# RELEASING.md for the full procedure.
+# Pushing a v* tag IS the release: the package and its documentation are
+# published directly, not as a candidate. Hackage versions cannot be
+# deleted afterwards, only deprecated, so the guards below refuse to run
+# unless the tag, the cabal version and a dated CHANGELOG entry all agree.
+# See RELEASING.md for the full procedure.
 #
 # Requires the HACKAGE_AUTH_TOKEN repository secret: a Hackage API token
 # generated on https://hackage.haskell.org/users/account-management.
-name: Hackage candidate
+name: Hackage release
 
 on:
   push:
@@ -18,8 +19,8 @@ permissions:
   contents: read
 
 jobs:
-  candidate:
-    name: Build and upload candidate
+  release:
+    name: Build and publish
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -52,8 +53,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.setup.outputs.cabal-store }}
-          key: hackage-candidate-${{ runner.os }}-ghc-9.10.3-${{ hashFiles('mcp-server.cabal') }}
-          restore-keys: hackage-candidate-${{ runner.os }}-ghc-9.10.3-
+          key: hackage-release-${{ runner.os }}-ghc-9.10.3-${{ hashFiles('mcp-server.cabal') }}
+          restore-keys: hackage-release-${{ runner.os }}-ghc-9.10.3-
 
       - name: cabal check
         run: cabal check
@@ -80,22 +81,21 @@ jobs:
           mkdir -p "$RUNNER_TEMP/docs"
           mv "dist-newstyle/mcp-server-${VERSION}-docs.tar.gz" "$RUNNER_TEMP/docs/"
 
-      - name: Upload candidate package
-        # No --publish: this goes to the candidate area.
+      - name: Publish package
+        # Re-running this workflow for an already-published version fails
+        # here, harmlessly: Hackage rejects duplicate uploads.
         run: |
-          cabal upload --token "$HACKAGE_AUTH_TOKEN" \
+          cabal upload --publish --token "$HACKAGE_AUTH_TOKEN" \
             "$RUNNER_TEMP/packages/mcp-server-${VERSION}.tar.gz"
         env:
           HACKAGE_AUTH_TOKEN: ${{ secrets.HACKAGE_AUTH_TOKEN }}
 
-      - name: Upload candidate documentation
+      - name: Publish documentation
         run: |
-          cabal upload --token "$HACKAGE_AUTH_TOKEN" --documentation \
+          cabal upload --publish --token "$HACKAGE_AUTH_TOKEN" --documentation \
             "$RUNNER_TEMP/docs/mcp-server-${VERSION}-docs.tar.gz"
         env:
           HACKAGE_AUTH_TOKEN: ${{ secrets.HACKAGE_AUTH_TOKEN }}
 
-      - name: Where to go next
-        run: |
-          echo "Candidate uploaded. Review and publish it at:"
-          echo "  https://hackage.haskell.org/package/mcp-server-${VERSION}/candidate"
+      - name: Published
+        run: echo "Published https://hackage.haskell.org/package/mcp-server-${VERSION}"
