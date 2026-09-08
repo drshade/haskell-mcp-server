@@ -617,7 +617,7 @@ requests and diff the responses. Contributions of new cases are welcome.
 ## Contributing
 
 Contributions are welcome. See the issue tracker for open issues and feature
-requests.
+requests, and [RELEASING.md](RELEASING.md) for how versions reach Hackage.
 
 ## AI assistance
 

@@ -1,0 +1,101 @@
+# Upload a release candidate to Hackage when a version tag is pushed.
+#
+# Nothing here publishes. The package and its documentation land on the
+# candidate page (https://hackage.haskell.org/package/mcp-server/candidate),
+# and a maintainer promotes the candidate by hand from there. See
+# RELEASING.md for the full procedure.
+#
+# Requires the HACKAGE_AUTH_TOKEN repository secret: a Hackage API token
+# generated on https://hackage.haskell.org/users/account-management.
+name: Hackage candidate
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    name: Build and upload candidate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches the package version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version="$(sed -n 's/^version:[[:space:]]*//p' mcp-server.cabal)"
+          echo "tag=$tag cabal=$version"
+          if [ "$tag" != "$version" ]; then
+            echo "::error::tag v$tag does not match version $version in mcp-server.cabal"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Check the CHANGELOG entry is dated
+        run: |
+          if ! grep -Eq "^## ${VERSION} - [0-9]{4}-[0-9]{2}-[0-9]{2}$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no dated '## ${VERSION} - YYYY-MM-DD' entry (still '???'?)"
+            exit 1
+          fi
+
+      - uses: haskell-actions/setup@v2
+        id: setup
+        with:
+          ghc-version: '9.10.3'
+          cabal-version: 'latest'
+
+      - name: Cache cabal store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.setup.outputs.cabal-store }}
+          key: hackage-candidate-${{ runner.os }}-ghc-9.10.3-${{ hashFiles('mcp-server.cabal') }}
+          restore-keys: hackage-candidate-${{ runner.os }}-ghc-9.10.3-
+
+      - name: cabal check
+        run: cabal check
+
+      - name: Source distribution
+        run: cabal sdist --output-directory "$RUNNER_TEMP/packages"
+
+      - name: Build and test from the source distribution
+        # What Hackage receives is the sdist, not the working tree: unpack it
+        # somewhere clean and make sure it builds and passes on its own.
+        run: |
+          mkdir -p "$RUNNER_TEMP/sdist-check"
+          tar -xzf "$RUNNER_TEMP/packages/mcp-server-${VERSION}.tar.gz" -C "$RUNNER_TEMP/sdist-check"
+          cd "$RUNNER_TEMP/sdist-check/mcp-server-${VERSION}"
+          cabal update
+          cabal build all --enable-tests
+          cabal test
+
+      - name: Documentation tarball
+        # Built from the working tree; the docs tarball must be produced by
+        # --haddock-for-hackage or Hackage will reject it.
+        run: |
+          cabal haddock --haddock-for-hackage --enable-doc
+          mkdir -p "$RUNNER_TEMP/docs"
+          mv "dist-newstyle/mcp-server-${VERSION}-docs.tar.gz" "$RUNNER_TEMP/docs/"
+
+      - name: Upload candidate package
+        # No --publish: this goes to the candidate area.
+        run: |
+          cabal upload --token "$HACKAGE_AUTH_TOKEN" \
+            "$RUNNER_TEMP/packages/mcp-server-${VERSION}.tar.gz"
+        env:
+          HACKAGE_AUTH_TOKEN: ${{ secrets.HACKAGE_AUTH_TOKEN }}
+
+      - name: Upload candidate documentation
+        run: |
+          cabal upload --token "$HACKAGE_AUTH_TOKEN" --documentation \
+            "$RUNNER_TEMP/docs/mcp-server-${VERSION}-docs.tar.gz"
+        env:
+          HACKAGE_AUTH_TOKEN: ${{ secrets.HACKAGE_AUTH_TOKEN }}
+
+      - name: Where to go next
+        run: |
+          echo "Candidate uploaded. Review and publish it at:"
+          echo "  https://hackage.haskell.org/package/mcp-server-${VERSION}/candidate"
