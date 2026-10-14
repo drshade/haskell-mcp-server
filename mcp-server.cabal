@@ -191,6 +191,7 @@ test-suite haskell-mcp-server-test
     Spec.ModernEra
     Spec.Progress
     Spec.ProtocolVersionNegotiation
+    Spec.RawSchema
     Spec.SchemaValidation
     Spec.Subscriptions
     Spec.TemplatesCompletions

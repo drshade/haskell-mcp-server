@@ -420,6 +420,16 @@ promptGetHandler  :: ClientContext -> PromptName -> Map Text Text -> IO (Either 
 handlers = noHandlers { prompts = Just (promptListHandler, promptGetHandler) }
 ```
 
+Tool schemas built by hand can use `SchemaRaw` for anything the typed
+shapes cannot express — `null`, `anyOf`, `$defs` and `$ref`, numeric bounds
+— and it is serialized as given:
+
+```haskell
+nullableCount :: Schema
+nullableCount = schema $ SchemaRaw $ KeyMap.fromList
+    [ "anyOf" .= [object ["type" .= ("null" :: Text)], object ["type" .= ("integer" :: Text), "minimum" .= (0 :: Int)]] ]
+```
+
 ## Transports
 
 ### stdio

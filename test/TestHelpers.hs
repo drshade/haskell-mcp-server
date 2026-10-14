@@ -18,6 +18,7 @@ module TestHelpers
   ) where
 
 import           Data.Aeson (Value (..))
+import qualified Data.Aeson.KeyMap as KM
 import           Data.Map   (Map)
 import qualified Data.Map   as Map
 import           Data.Text  (Text)
@@ -71,6 +72,9 @@ schemaTypeName s = case schemaShape s of
   SchemaBoolean    -> "boolean"
   SchemaArray _    -> "array"
   SchemaObject _ _ -> "object"
+  SchemaRaw keywords -> case KM.lookup "type" keywords of
+    Just (String name) -> name
+    _                  -> "raw"
 
 -- | The properties of an object schema (empty for non-objects).
 schemaProps :: Schema -> [(Text, Schema)]

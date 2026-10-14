@@ -528,6 +528,11 @@ data SchemaType
   | SchemaArray Schema
   | SchemaObject [(Text, Schema)] [Text]
     -- ^ Properties and the names of the required ones
+  | SchemaRaw Object
+    -- ^ JSON Schema keywords, serialized as given. An escape hatch for
+    -- schemas the other shapes cannot express, such as @null@, @anyOf@,
+    -- @$defs@ and @$ref@, or numeric bounds. The library does not check
+    -- them; a tool's input schema must still describe an object.
   deriving (Show, Eq, Generic)
 
 -- | A schema with no description.
@@ -539,6 +544,8 @@ describedSchema :: Text -> SchemaType -> Schema
 describedSchema desc = Schema (Just desc)
 
 instance ToJSON Schema where
+  -- The description comes last, so for raw keywords it replaces any
+  -- description they contain.
   toJSON (Schema desc shape) = object $
     typeFields shape ++ maybe [] (\d -> ["description" .= d]) desc
     where
@@ -558,6 +565,7 @@ instance ToJSON Schema where
         , "properties" .= object (map (\(k, v) -> fromText k .= v) props)
         , "required" .= req
         ]
+      typeFields (SchemaRaw keywords) = KM.toList keywords
 
 -- | Prompt definition (2025-06-18 enhanced)
 data PromptDefinition = PromptDefinition
