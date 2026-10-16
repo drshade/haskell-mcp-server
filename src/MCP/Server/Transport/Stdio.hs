@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- | The stdio transport: newline-delimited JSON-RPC on stdin and stdout,
+-- with logging on stderr.
 module MCP.Server.Transport.Stdio
   ( -- * STDIO Transport
     transportRunStdio

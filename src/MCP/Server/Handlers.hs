@@ -1,6 +1,10 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- | Protocol dispatch: routes each JSON-RPC message to the matching
+-- user handler and builds the response for the request's protocol era.
+-- The transports call 'handleMcpMessage'; the per-method handlers are
+-- exported for testing and custom transports.
 module MCP.Server.Handlers
   ( -- * Core Message Handling
     handleMcpMessage
@@ -362,7 +366,7 @@ handlePing req = return $ makeSuccessResponse (requestId req) (toJSON PongRespon
 -- revisions, capabilities and identity, available before any other request.
 -- Also serves as the stdio backwards-compatibility probe. The modern result
 -- envelope (resultType, serverInfo _meta, cacheability) is stamped on by
--- 'decorateModern'.
+-- 'handleMcpMessage'.
 handleServerDiscover :: McpServerInfo -> NotificationSupport -> McpServerHandlers -> JsonRpcRequest -> IO JsonRpcResponse
 handleServerDiscover serverInfo notifSupport handlers req = do
   -- Modern clients receive notifications via subscriptions/listen, so both
