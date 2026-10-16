@@ -203,9 +203,9 @@ issued by another instance or a retired key.
 
 There is no compression: compressing attacker-chosen answers together
 with secret `step` results before encryption would leak information
-through ciphertext length. A configurable size limit (default 16 KiB)
-fails a round whose state would exceed it, with an error that names the
-cause.
+through ciphertext length. There is no size limit either; the
+specification sets none, and the size is under the handler author's
+control.
 
 Configuration is a `StateCodec` in the transport configurations:
 
@@ -224,7 +224,8 @@ single HTTP instance; multi-instance HTTP deployments must share a key
 through `aeadStateCodec`, and the HTTP documentation says so. Replacing
 the codec is the override, for example a codec that keeps journals in a
 server-side store and puts only a key in `requestState`. The default
-expiry is ten minutes, configurable.
+expiry is 60 minutes, configurable; the spec asks only for a "short"
+expiry, and a user may take a while to answer a form.
 
 ### Wire and eras
 
