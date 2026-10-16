@@ -1,6 +1,6 @@
 # ADR 0014: Raw JSON Schema keywords
 
-- **Status**: Landed (0.3.0.0)
+- **Status**: Landed
 - **Date**: 2026-10-13
 - **Depends on**: —
 
@@ -45,8 +45,7 @@ The library does not interpret or validate the keywords. Like
 - Servers can advertise any JSON Schema without leaving the typed handler
   API, and the derived schemas are unchanged.
 - Adding a constructor breaks exhaustive matches on `SchemaType` in
-  downstream code, so under the PVP this needs a major version bump; it
-  ships in 0.3.0.0.
+  downstream code, so under the PVP this needs a major version bump.
 - Validity is the caller's responsibility: the specification requires a
   tool's `inputSchema` to describe an object, and nothing checks that raw
   keywords do.
