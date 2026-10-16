@@ -420,6 +420,24 @@ promptGetHandler  :: ClientContext -> PromptName -> Map Text Text -> IO (Either 
 handlers = noHandlers { prompts = Just (promptListHandler, promptGetHandler) }
 ```
 
+Tool schemas built by hand can use `SchemaRaw` for anything the typed
+shapes cannot express — `null`, `anyOf`, `$defs` and `$ref`, numeric bounds
+— and it is serialized as given:
+
+```haskell
+import Data.Aeson (object, (.=))
+import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Text (Text)
+
+nullableCount :: Schema
+nullableCount = schema $ SchemaRaw $ KeyMap.fromList
+    [ "anyOf" .= [object ["type" .= ("null" :: Text)], object ["type" .= ("integer" :: Text), "minimum" .= (0 :: Int)]] ]
+```
+
+A `$ref` such as `#/$defs/node` resolves against the root of the whole
+input schema, not the raw fragment it appears in, so a recursive schema is
+best written raw from the root down.
+
 ## Transports
 
 ### stdio

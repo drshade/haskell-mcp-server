@@ -50,3 +50,4 @@ Filename `ADR_XXXX_short_slug.md`, numbered sequentially. Body:
 | [0011](ADR_0011_protocol_completeness.md) | Pagination and the extensions capability | Proposed |
 | [0012](ADR_0012_tasks_extension.md) | Tasks extension | Hold |
 | [0013](ADR_0013_conformance_corpus_extraction.md) | Extracting the conformance corpus | Hold |
+| [0014](ADR_0014_raw_schemas.md) | Raw JSON Schema keywords | Landed (0.3.0.0) |

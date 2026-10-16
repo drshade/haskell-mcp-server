@@ -1,5 +1,14 @@
 # Revision history for mcp-server
 
+## 0.3.0.0 - ???
+
+* Raw JSON Schema keywords (ADR 0014): `SchemaRaw` is a new `SchemaType`
+  that serializes its keywords as given, for schemas the other shapes
+  cannot express, such as `null`, `anyOf`, `$defs`/`$ref` or numeric
+  bounds. A `schemaDescription` alongside it replaces any `description`
+  among the keywords. BREAKING: exhaustive matches on `SchemaType` need a
+  case for it.
+
 ## 0.2.0.2 - 2026-09-08
 
 * stdio: in-flight requests are drained at stdin EOF instead of being

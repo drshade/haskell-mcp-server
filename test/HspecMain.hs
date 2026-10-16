@@ -17,6 +17,7 @@ import qualified Spec.HttpTransport
 import qualified Spec.ModernEra
 import qualified Spec.Progress
 import qualified Spec.ProtocolVersionNegotiation
+import qualified Spec.RawSchema
 import qualified Spec.Subscriptions
 import qualified Spec.TemplatesCompletions
 import qualified Spec.ToolCallParsing
@@ -39,6 +40,7 @@ main = hspec $ do
     Spec.ModernEra.spec
     Spec.Progress.spec
     Spec.ProtocolVersionNegotiation.spec
+    Spec.RawSchema.spec
     Spec.Subscriptions.spec
     Spec.TemplatesCompletions.spec
     Spec.ToolCallParsing.spec
