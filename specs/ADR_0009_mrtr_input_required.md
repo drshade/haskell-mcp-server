@@ -55,14 +55,69 @@ handlers — exactly the shared state MRTR is designed to avoid.
 
 ## Decision
 
-Two layers: a low-level result type that maps directly onto the wire, and
-a high-level `Ask` monad that turns multi-round handlers into
-straight-line code by **journaled replay**. The library owns
-`requestState` in both.
+The derived (Template Haskell) interface is the one users write against,
+so the design starts there: a derived handler can return `Ask` instead of
+`IO`, and ask questions whose forms are derived from records. Underneath
+sit an `Ask` monad that turns multi-round handlers into straight-line
+code by **journaled replay**, and a low-level result type that maps
+directly onto the wire. The library owns `requestState` throughout.
+
+### Derived handlers and forms
+
+Today a derived tool handler has the type
+`ClientContext -> MyTool -> IO r`. It may now also return `Ask r`:
+
+```haskell
+data Environment = Staging | Production
+
+data DeployTarget = DeployTarget
+  { environment :: Environment
+  , reason      :: Text
+  }
+
+data Confirm = Confirm { proceed :: Bool }
+
+data OpsTool = Deploy { service :: Text }
+
+$(deriveForm ''DeployTarget)
+$(deriveForm ''Confirm)
+
+handleTool :: ClientContext -> OpsTool -> Ask Content
+handleTool _ (Deploy svc) = do
+  target <- elicit ("Where should " <> svc <> " deploy to?")
+  case target of
+    Accepted t -> do
+      plan <- step (planDeploy svc (environment t))
+      ok   <- elicit ("Apply " <> describe plan <> "?")
+      case ok of
+        Accepted (Confirm True) -> ContentText <$> step (applyPlan plan)
+        _                       -> pure (ContentText "Deployment cancelled")
+    _ -> pure (ContentText "No target chosen")
+
+main = runMcpServerStdio info noHandlers
+  { tools = Just $(deriveToolHandler ''OpsTool 'handleTool) }
+```
+
+- `deriveForm ''T` generates an instance of `class Form a` (the flat
+  elicitation schema and a parser for the accepted `content`) from a
+  record of strings, numbers, booleans, enumerations, optional fields and
+  lists of enumeration values: what elicitation allows. A nested record
+  or other unsupported field is a compile-time error naming the field.
+  `deriveFormWithDescription` takes field descriptions as the other
+  derive functions do.
+- `elicit :: Form a => Text -> Ask (Answer a)` picks the form from the
+  result type, so a question is one line.
+- The `derive*Handler` splices accept handlers in `IO` or `Ask`, through
+  a small class with an instance for each, so existing handlers compile
+  unchanged and switching one to `Ask` changes only its type.
+- `deriveToolHandler`, `derivePromptHandler` and `deriveResourceHandler`
+  all support it, since the spec allows `input_required` on
+  `tools/call`, `prompts/get` and `resources/read`.
 
 ### Low level: `Outcome`
 
-The three call handlers gain an outcome type:
+Hand-written handlers, and the code the derive functions generate, use
+an outcome type. The three call handlers return it:
 
 ```haskell
 data Outcome a
@@ -102,7 +157,7 @@ the untyped `RawInputRequest` / `RawInputResponse` pass-through.
 ```haskell
 data Answer a = Accepted a | Declined | Cancelled | Unavailable
 
-elicit    :: Text -> Form a -> Ask (Answer a)
+elicit    :: Form a => Text -> Ask (Answer a)
 elicitUrl :: Text -> URI -> Ask (Answer ())
 step      :: (ToJSON a, FromJSON a) => IO a -> Ask a
 askContext :: Ask ClientContext
@@ -111,22 +166,9 @@ instance MonadIO Ask   -- plain liftIO: not journaled, runs every round
 runAsk :: Ask a -> ClientContext -> IO (Either Error (Outcome a))
 ```
 
-`Form a` pairs a flat elicitation schema with a parser for the accepted
-`content`; forms are built by hand at first and derived later (see
-*Phasing*).
-
-A handler is ordinary sequential code:
-
-```haskell
-deploy :: DeployArgs -> Ask ToolResult
-deploy args = do
-  env  <- elicit "Which environment?" envForm
-  plan <- step (computePlan env)
-  ok   <- elicit ("Apply " <> summary plan <> "?") confirmForm
-  case ok of
-    Accepted True -> toolResult . pure . text <$> step (applyPlan plan)
-    _             -> pure (toolError "Deployment cancelled")
-```
+`Form a` is usually derived with `deriveForm` (above). It can also be
+written by hand, as a schema plus a parser, for forms a record cannot
+describe.
 
 The library runs the handler from the start on every round, against a
 **journal** of what earlier rounds produced:
@@ -239,25 +281,19 @@ expiry, and a user may take a while to answer a form.
   unanswered, so the handler asks again.
 - Progress and cancellation work per round; each round is its own request.
 
-### Derived handlers
-
-The derive functions accept handlers in `Ask` as well as `IO`, so a
-derived tool can ask questions without leaving the generated
-argument parsing.
-
 ### Phasing
 
 1. Wire types, `Outcome`, the state codec and capability checks, with
    golden fixtures for full cycles (call → `input_required` → retry →
    result) and for rejected state (tampered, expired, other principal,
    other arguments).
-2. The `Ask` monad, `step`, journal fingerprints, and derive support.
-3. Template Haskell forms: `deriveForm ''GithubLogin` produces the flat
-   schema and the `content` parser, rejecting nested records at compile
-   time. The same schema machinery as ADR_0005.
+2. The `Ask` monad, `step` and journal fingerprints.
+3. The derived interface: `Ask` handlers in the `derive*Handler` splices,
+   and `deriveForm`, reusing the schema machinery from ADR_0005.
 
-Phases 1 and 2 ship together as 0.4.0.0. Phase 3 is additive and can
-follow in a minor release.
+All three ship together: the derived interface is what users will use,
+so the feature is not done until phase 3 lands. The version number is
+decided at release time.
 
 ### Deferred
 
@@ -269,9 +305,13 @@ follow in a minor release.
 
 ## Consequences
 
-- Breaking: the call handler types change to return `Outcome`, and the
-  transport configurations gain a state codec. Hand-written handlers
-  migrate by wrapping results in `Complete`. 0.4.0.0 under the PVP.
+- Derived handlers are unaffected: existing `IO` handlers compile
+  unchanged, and `Ask` is opt-in per handler.
+- Hand-written call handlers change type to return `Outcome`, and
+  migrate by wrapping results in `Complete`. `ClientContext` and the
+  transport configurations gain fields. This is breaking under the PVP;
+  we accept it for the cleaner design, since the derived interface is
+  the one in use.
 - New dependency: `crypton` for the AEAD, random nonces and SHA-256.
 - Handlers written with `Ask` read like single-round code. In exchange
   they must keep their questions deterministic, wrap IO that must not

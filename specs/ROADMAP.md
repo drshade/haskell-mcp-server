@@ -13,9 +13,9 @@ What has shipped, and in which release, is in the
 1. [ADR_0009 — MRTR: handlers that ask for input](ADR_0009_mrtr_input_required.md).
    The largest missing capability: tools, prompts and resources that ask
    the user for input mid-call, the 2026-07-28 replacement for
-   elicitation. Breaking (call handlers return `Outcome`), so it is the
-   headline of 0.4.0.0, and other result-shape changes should be designed
-   with it.
+   elicitation. Derived handlers gain `Ask` and derived forms; the
+   low-level handler types change, so other result-shape changes should
+   be designed with it.
 
 ## Opportunistic — order by demand
 
