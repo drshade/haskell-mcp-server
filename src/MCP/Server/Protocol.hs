@@ -1,6 +1,8 @@
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Request and response payloads for each MCP method, and the protocol
+-- revisions this library supports.
 module MCP.Server.Protocol
   ( -- * MCP Protocol Messages
     InitializeRequest(..)
@@ -85,7 +87,7 @@ modernVersions =
   ]
 
 -- | Every revision this library implements, newest first — what
--- @server\/discover@ and 'UnsupportedProtocolVersionError' report.
+-- @server\/discover@ and @UnsupportedProtocolVersionError@ report.
 allVersions :: [Text]
 allVersions = modernVersions ++ supportedVersions
 

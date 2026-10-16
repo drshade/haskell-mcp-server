@@ -1,6 +1,10 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- | Build an MCP server: run it over stdio or HTTP, or mount it as a WAI
+-- application, with the handler and definition types re-exported from
+-- "MCP.Server.Types". "MCP.Server.Derive" generates handlers from data
+-- types.
 module MCP.Server
   ( -- * Server Runtime
     runMcpServerStdio

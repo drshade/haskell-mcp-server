@@ -6,7 +6,7 @@
 --
 -- Tool arguments are decoded from full JSON values: records may contain
 -- primitive fields ('Data.Text.Text', 'Int', 'Integer', 'Double', 'Float',
--- 'Bool'), optional fields ('Maybe'), lists, enumerations (data types whose
+-- t'Bool'), optional fields ('Maybe'), lists, enumerations (data types whose
 -- constructors are all nullary), and nested records — the generated
 -- @inputSchema@ mirrors the same structure. Prompt arguments are
 -- string-valued per the MCP specification, so prompt records are limited to
@@ -437,7 +437,7 @@ derivePromptHandlerWithDescription :: Name -> Name -> [(String, String)] -> Q Ex
 derivePromptHandlerWithDescription typeName handlerName descriptions =
   derivePromptHandlerGeneric typeName handlerName (optionsFromDescriptions descriptions) descriptions
 
--- | Derive prompt handlers with per-constructor 'DefinitionOptions'
+-- | Derive prompt handlers with per-constructor t'DefinitionOptions'
 -- (title, icons, scoped argument descriptions). Usage:
 --
 -- > $(derivePromptHandlerWithOptions ''MyPrompt 'handlePrompt
@@ -553,7 +553,7 @@ deriveResourceHandlerWithDescription :: Name -> Name -> [(String, String)] -> Q 
 deriveResourceHandlerWithDescription typeName handlerName descriptions =
   deriveResourceHandlerGeneric typeName handlerName (optionsFromDescriptions descriptions)
 
--- | Derive resource handlers with per-constructor 'DefinitionOptions'
+-- | Derive resource handlers with per-constructor t'DefinitionOptions'
 -- (description, title, icons).
 deriveResourceHandlerWithOptions :: Name -> Name -> [(String, DefinitionOptions)] -> Q Exp
 deriveResourceHandlerWithOptions typeName handlerName opts =
@@ -597,7 +597,7 @@ deriveResourceTemplatesWithDescription typeName descriptions =
   deriveResourceTemplatesGeneric typeName (optionsFromDescriptions descriptions)
 
 -- | Derive a 'ResourceTemplateListHandler' with per-constructor
--- 'DefinitionOptions' (description, title, icons).
+-- t'DefinitionOptions' (description, title, icons).
 deriveResourceTemplatesWithOptions :: Name -> [(String, DefinitionOptions)] -> Q Exp
 deriveResourceTemplatesWithOptions typeName opts =
   deriveResourceTemplatesGeneric typeName (optionsFor opts)
@@ -715,7 +715,7 @@ deriveToolHandlerWithDescription :: Name -> Name -> [(String, String)] -> Q Exp
 deriveToolHandlerWithDescription typeName handlerName descriptions =
   deriveToolHandlerGeneric typeName handlerName (optionsFromDescriptions descriptions) descriptions Nothing
 
--- | Derive tool handlers with per-constructor 'DefinitionOptions'
+-- | Derive tool handlers with per-constructor t'DefinitionOptions'
 -- (description, title, icons, behavioral annotations, scoped argument
 -- descriptions). Usage:
 --
@@ -741,7 +741,7 @@ deriveToolHandler typeName handlerName =
 -- record type describing the tools' results. Its shape becomes the derived
 -- @outputSchema@ (same field rules as input derivation: primitives,
 -- 'Maybe', lists, all-nullary enums, nested records), and the handler
--- returns @'ToolOutput' \<output\>@, whose typed values the derivation
+-- returns @t'ToolOutput' \<output\>@, whose typed values the derivation
 -- serializes into @structuredContent@ — guaranteed to match the schema.
 --
 -- > handleTool :: ClientContext -> MyTool -> IO (ToolOutput WeatherReport)
@@ -758,7 +758,7 @@ deriveToolHandlerWithOutputDescription typeName handlerName outputName descripti
   deriveToolHandlerGeneric typeName handlerName (optionsFromDescriptions descriptions) descriptions (Just outputName)
 
 -- | 'deriveToolHandlerWithOutput' with per-constructor
--- 'DefinitionOptions'. An entry keyed by the output type's name supplies
+-- t'DefinitionOptions'. An entry keyed by the output type's name supplies
 -- the @outputSchema@ field descriptions via 'optFieldDescriptions'.
 deriveToolHandlerWithOutputOptions :: Name -> Name -> Name -> [(String, DefinitionOptions)] -> Q Exp
 deriveToolHandlerWithOutputOptions typeName handlerName outputName opts =

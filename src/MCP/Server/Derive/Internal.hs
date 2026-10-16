@@ -225,8 +225,8 @@ templateField name p segs i = case drop i segs of
 -- Structured output
 -- ---------------------------------------------------------------------------
 
--- | Turn a 'ToolOutput' into the 'ToolResult' that goes on the wire, given
--- the generated serializer for the output type. A plain 'ToolOutput' also
+-- | Turn a t'ToolOutput' into the t'ToolResult' that goes on the wire, given
+-- the generated serializer for the output type. A plain v'ToolOutput' also
 -- carries the serialized JSON as a text content block, per the spec's
 -- recommendation for clients that predate structured output.
 resolveToolOutput :: (o -> Value) -> ToolOutput o -> ToolResult

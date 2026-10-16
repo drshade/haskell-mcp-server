@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings   #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
+-- | The Streamable HTTP transport, as a standalone Warp server
+-- ('transportRunHttp') or a WAI application to mount in an existing one
+-- ('mcpApplication').
 module MCP.Server.Transport.Http
   ( -- * HTTP Transport
     HttpConfig(..)
@@ -50,7 +53,7 @@ import           MCP.Server.Types
 
 -- | HTTP transport configuration following the MCP Streamable HTTP specification
 --
--- Note: 'HttpConfig' has no 'Show'/'Eq' instances because 'httpAuthorize' is a
+-- Note: t'HttpConfig' has no 'Show'/'Eq' instances because 'httpAuthorize' is a
 -- function.
 data HttpConfig = HttpConfig
   { httpPort      :: Int      -- ^ Port to listen on
@@ -63,7 +66,7 @@ data HttpConfig = HttpConfig
       --   'Nothing' when absent / not a Bearer credential) is passed to
       --   @check@, which returns the caller's principal: @'Just' principal@
       --   authorizes the request — the principal (e.g. a role) is placed in the
-      --   handler 'ClientContext' as 'clientPrincipal' — while 'Nothing' rejects
+      --   handler t'ClientContext' as 'clientPrincipal' — while 'Nothing' rejects
       --   the request with @401@. Validation and principal assignment are left
       --   entirely to the caller.
   , httpAllowedOrigins :: Maybe [Text]
@@ -324,6 +327,8 @@ peekIsModern :: BodyPeek -> Bool
 peekIsModern peek =
   peekMetaVersion peek /= Nothing || peekMethod peek == Just "server/discover"
 
+-- | Extract the t'BodyPeek' fields from a raw request body. A body that is
+-- not a JSON object yields a peek with every field empty.
 peekBody :: BSL.ByteString -> BodyPeek
 peekBody body = case decode body of
   Just (Object o) -> BodyPeek

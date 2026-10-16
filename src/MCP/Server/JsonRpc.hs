@@ -1,6 +1,8 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | JSON-RPC 2.0 messages: requests, responses, errors and notifications,
+-- with parsing and encoding.
 module MCP.Server.JsonRpc
   ( -- * JSON-RPC Types
     JsonRpcRequest(..)

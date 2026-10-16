@@ -2,6 +2,9 @@
 {-# LANGUAGE DeriveLift        #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | The library's core types: the content, results, definitions and JSON
+-- Schemas that handlers produce, the handler signatures themselves, and the
+-- server information and capabilities advertised to clients.
 module MCP.Server.Types
   ( -- * Content Types
     Content(..)
@@ -104,9 +107,13 @@ import           GHC.Generics     (Generic)
 import           Language.Haskell.TH.Syntax (Lift)
 import           Network.URI      (URI, parseURI)
 
+-- | The name of a prompt, as in @prompts\/get@.
 type PromptName = Text
+-- | The name of a tool, as in @tools\/call@.
 type ToolName = Text
+-- | The name of a prompt or tool argument.
 type ArgumentName = Text
+-- | A prompt argument's value; prompt arguments are always strings.
 type ArgumentValue = Text
 
 -- | Content that can be returned by prompts, resources, and tools
@@ -119,7 +126,7 @@ data Content
   | ContentResourceLink ResourceDefinition
     -- ^ A reference to a resource the client can read separately
   | ContentAnnotated Annotations Content
-    -- ^ A content block carrying 'Annotations'; the annotations are merged
+    -- ^ A content block carrying t'Annotations'; the annotations are merged
     -- into the inner block's JSON object. Do not nest.
   deriving (Show, Eq, Generic)
 
@@ -202,11 +209,13 @@ instance FromJSON Annotations where
     <*> o .:? "priority"
     <*> o .:? "lastModified"
 
+-- | The payload of an image content block.
 data ContentImageData = ContentImageData
   { contentImageData     :: Text  -- ^ base64-encoded image data
   , contentImageMimeType :: Text
   } deriving (Show, Eq, Generic)
 
+-- | The payload of an audio content block.
 data ContentAudioData = ContentAudioData
   { contentAudioData     :: Text  -- ^ base64-encoded audio data
   , contentAudioMimeType :: Text
@@ -394,7 +403,7 @@ toolError :: Text -> ToolResult
 toolError msg = (toolResult [ContentText msg]) { toolResultIsError = True }
 
 -- | Types a tool handler may return. Returning plain 'Content' (or 'Text')
--- keeps simple handlers simple; return a full 'ToolResult' for multiple
+-- keeps simple handlers simple; return a full t'ToolResult' for multiple
 -- content blocks, structured content, or execution errors.
 class ToToolResult a where
   toToolResult :: a -> ToolResult
@@ -406,7 +415,7 @@ instance ToToolResult Content where
   toToolResult c = toolResult [c]
 
 -- | Concatenates content; a merged result is an error if any element is
--- ('toolResultIsError' is OR-ed), and the first present 'structuredContent'
+-- ('toolResultIsError' is OR-ed), and the first present @structuredContent@
 -- and @_meta@ are kept.
 instance ToToolResult a => ToToolResult [a] where
   toToolResult xs = ToolResult
@@ -438,7 +447,7 @@ data ToolOutput o
   | ToolOutputError Text
     -- ^ An execution failure, reported with @isError@ (see 'toolError').
   | ToolOutputRaw ToolResult
-    -- ^ Full control: return this 'ToolResult' as-is, with no structured
+    -- ^ Full control: return this t'ToolResult' as-is, with no structured
     -- content implied.
   deriving (Show, Eq)
 
@@ -450,7 +459,7 @@ data PromptResult = PromptResult
   } deriving (Show, Eq, Generic)
 
 -- | Types a prompt handler may return. Plain 'Content' (or 'Text') becomes a
--- single user message; return 'PromptResult' or @['PromptMessage']@ for
+-- single user message; return t'PromptResult' or @[t'PromptMessage']@ for
 -- multi-message conversations or assistant roles.
 class ToPromptResult a where
   toPromptResult :: a -> PromptResult
@@ -577,7 +586,7 @@ data PromptDefinition = PromptDefinition
   } deriving (Show, Eq, Generic)
 
 -- | A prompt definition with only the required fields set; record-update
--- the optional ones (constructing 'PromptDefinition' directly breaks when
+-- the optional ones (constructing t'PromptDefinition' directly breaks when
 -- fields are added).
 mkPromptDefinition :: Text -> Text -> [ArgumentDefinition] -> PromptDefinition
 mkPromptDefinition name description args = PromptDefinition
@@ -756,6 +765,8 @@ instance ToJSON PromptCapabilities where
     [ fmap ("listChanged" .=) (promptListChanged caps)
     ]
 
+-- | The @resources@ capability: whether the server supports subscriptions
+-- and list-change notifications.
 data ResourceCapabilities = ResourceCapabilities
   { resourceSubscribe   :: Maybe Bool
   , resourceListChanged :: Maybe Bool
@@ -767,6 +778,8 @@ instance ToJSON ResourceCapabilities where
     , fmap ("listChanged" .=) (resourceListChanged caps)
     ]
 
+-- | The @tools@ capability: whether the server sends list-change
+-- notifications.
 data ToolCapabilities = ToolCapabilities
   { toolListChanged :: Maybe Bool
   } deriving (Show, Eq, Generic)
@@ -776,6 +789,7 @@ instance ToJSON ToolCapabilities where
     [ fmap ("listChanged" .=) (toolListChanged caps)
     ]
 
+-- | The @completions@ capability, which has no options.
 data CompletionCapabilities = CompletionCapabilities
   { -- No sub-capabilities defined
   } deriving (Show, Eq, Generic)
@@ -783,6 +797,7 @@ data CompletionCapabilities = CompletionCapabilities
 instance ToJSON CompletionCapabilities where
   toJSON _ = object []
 
+-- | The @logging@ capability, which has no options.
 data LoggingCapabilities = LoggingCapabilities
   { -- No specific sub-capabilities for logging yet
   } deriving (Show, Eq, Generic)
@@ -888,19 +903,25 @@ noNotificationSupport = NotificationSupport
   , supportsListen = False
   }
 
--- | Handler type definitions. Every handler receives the request's
--- 'ClientContext' as its first argument.
+-- | List the available prompts (@prompts\/list@). Every handler receives
+-- the request's t'ClientContext' as its first argument.
 --
 -- Prompt arguments are string-valued per the MCP specification; tool
 -- arguments are full JSON values.
 type PromptListHandler = ClientContext -> IO [PromptDefinition]
+-- | Render a prompt from its name and arguments (@prompts\/get@).
 type PromptGetHandler = ClientContext -> PromptName -> Map Text Text -> IO (Either Error PromptResult)
 
+-- | List the available resources (@resources\/list@).
 type ResourceListHandler = ClientContext -> IO [ResourceDefinition]
+-- | Read a resource by URI (@resources\/read@).
 type ResourceReadHandler = ClientContext -> URI -> IO (Either Error ResourceContent)
+-- | List the resource templates (@resources\/templates\/list@).
 type ResourceTemplateListHandler = ClientContext -> IO [ResourceTemplateDefinition]
 
+-- | List the available tools (@tools\/list@).
 type ToolListHandler = ClientContext -> IO [ToolDefinition]
+-- | Call a tool by name with its JSON arguments (@tools\/call@).
 type ToolCallHandler = ClientContext -> ToolName -> Map Text Value -> IO (Either Error ToolResult)
 
 -- | Completion handler: given what is being completed ('CompletionRef'), the

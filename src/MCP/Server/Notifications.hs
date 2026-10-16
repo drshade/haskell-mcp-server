@@ -2,9 +2,9 @@
 
 -- | Server-initiated change notifications.
 --
--- Create a notifier with 'newMcpNotifier', hand the 'NotificationSource' to
+-- Create a notifier with 'newMcpNotifier', hand the t'NotificationSource' to
 -- a transport via its configuration ('MCP.Server.Transport.Stdio.StdioConfig'
--- \/ 'MCP.Server.Transport.Http.HttpConfig'), keep the 'McpNotifier', and
+-- \/ 'MCP.Server.Transport.Http.HttpConfig'), keep the t'McpNotifier', and
 -- call its actions whenever your tool\/prompt\/resource lists (or a specific
 -- resource) change:
 --
