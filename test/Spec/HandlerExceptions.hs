@@ -14,6 +14,7 @@ import MCP.Server
 import MCP.Server.Handlers (handleMcpMessage)
 import MCP.Server.JsonRpc
 import Test.Hspec
+import TestHelpers (testStateCodec)
 
 throwingServer :: McpServerHandlers
 throwingServer = noHandlers
@@ -29,7 +30,7 @@ throwingServer = noHandlers
 
 call :: T.Text -> Value -> IO (Maybe JsonRpcMessage)
 call method params =
-  handleMcpMessage (McpServerInfo "T" "1" "") defaultCacheHints
+  handleMcpMessage (McpServerInfo "T" "1" "") defaultCacheHints testStateCodec
     noNotificationSupport (\_ -> pure ()) throwingServer anonymousContext
     (JsonRpcMessageRequest (JsonRpcRequest "2.0" (RequestIdNumber 7) method (Just params)))
 

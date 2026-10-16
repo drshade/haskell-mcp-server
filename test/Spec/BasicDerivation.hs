@@ -33,7 +33,7 @@ testResourceCall handler uriString expected = do
   case parseURI uriString of
     Just uri -> do
       result <- handler anonCtx uri
-      case result of
+      case completed result of
         Right (ResourceText _ _ content) -> content `shouldBe` expected
         Right (ResourceBlob _ _ _) -> expectationFailure "Expected ResourceText but got ResourceBlob"
         Left err -> expectationFailure $ "Expected success but got error: " ++ show err
@@ -64,7 +64,7 @@ spec = describe "Basic Template Haskell Derivation" $ do
             if useSubstringMatch testCase
               then do
                 result <- readHandler anonCtx uri
-                case result of
+                case completed result of
                   Right (ResourceText _ _ content) ->
                     T.isInfixOf (resourceExpectedContent testCase) content `shouldBe` True
                   Right (ResourceBlob _ _ _) -> expectationFailure "Expected ResourceText but got ResourceBlob"

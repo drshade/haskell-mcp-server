@@ -30,7 +30,9 @@ module Spec.GoldenWire (spec) where
 
 import Control.Monad (forM_)
 import Data.Aeson
+import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BSL
+import Data.Foldable (toList)
 import qualified Data.Map as Map
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -41,6 +43,7 @@ import MCP.Server.JsonRpc
 import System.Directory (doesFileExist)
 import System.Environment (lookupEnv)
 import Test.Hspec
+import TestHelpers (testStateCodec)
 
 goldenServerInfo :: McpServerInfo
 goldenServerInfo = McpServerInfo
@@ -64,7 +67,7 @@ goldenHandlers = noHandlers
           [ArgumentDefinition "name" "Who to greet" True]
       ]
     promptGet _ name args = case name of
-      "greet" -> pure $ Right $ PromptResult (Just "A greeting")
+      "greet" -> pure $ Right $ Complete $ PromptResult (Just "A greeting")
         [PromptMessage RoleUser (ContentText ("Hello, " <> Map.findWithDefault "?" "name" args <> "!"))]
       _ -> pure $ Left $ InvalidPromptName name
 
@@ -75,7 +78,7 @@ goldenHandlers = noHandlers
           }
       ]
     resourceRead _ uri
-      | show uri == "resource://info" = pure $ Right $ ResourceText uri "text/plain" "The golden info"
+      | show uri == "resource://info" = pure $ Right $ Complete $ ResourceText uri "text/plain" "The golden info"
       | otherwise = pure $ Left $ ResourceNotFound $ T.pack $ show uri
 
     toolList _ = pure
@@ -85,9 +88,9 @@ goldenHandlers = noHandlers
       ]
     toolCall _ name args = case name of
       "echo" -> case Map.lookup "text" args of
-        Just (String t) -> pure $ Right $ toolResult [ContentText ("echo: " <> t)]
+        Just (String t) -> pure $ Right $ Complete $ toolResult [ContentText ("echo: " <> t)]
         _               -> pure $ Left $ MissingRequiredParams "field 'text' is missing"
-      "boom" -> pure $ Right $ toolError "kaboom"
+      "boom" -> pure $ Right $ Complete $ toolError "kaboom"
       _      -> pure $ Left $ UnknownTool name
 
 -- The extended set's structured-output tool, derived so the corpus pins
@@ -174,11 +177,37 @@ extendedHandlers = goldenHandlers
            )
   }
 
+-- | 'goldenHandlers' with one tool that asks for input (multi round-trip
+-- requests): @confirm@ asks for a boolean @ok@ under the key @proceed@,
+-- with a request state, until it receives an answer.
+mrtrHandlers :: McpServerHandlers
+mrtrHandlers = goldenHandlers
+  { tools = Just
+      ( \_ -> pure []
+      , \ctx _name _args -> pure $ Right $
+          case Map.lookup "proceed" (clientInputResponses ctx) of
+            Nothing -> InputRequired
+              (Map.singleton "proceed" (ElicitForm "Proceed?"
+                (schema (SchemaObject [("ok", schema SchemaBoolean)] ["ok"]))))
+              (Just "confirming")
+            Just _ -> Complete (toolResult [ContentText "confirmed"])
+      )
+  }
+
+-- | A fixture value of @"<opaque>"@ matches any string: used for values a
+-- server generates afresh, such as a sealed @requestState@. Returns the
+-- actual value with those strings replaced, ready for an equality check.
+matchOpaque :: Value -> Value -> Value
+matchOpaque (String "<opaque>") (String _) = String "<opaque>"
+matchOpaque (Object f) (Object a) = Object (KM.mapWithKey (\k v -> maybe v (`matchOpaque` v) (KM.lookup k f)) a)
+matchOpaque (Array f) (Array a) | length f == length a = toJSON (zipWith matchOpaque (toList f) (toList a))
+matchOpaque _ actual = actual
+
 -- | One manifest entry: which case, and which reference-server variant
 -- answers it.
 data GoldenCase = GoldenCase
   { caseName          :: FilePath
-  , caseHandlers      :: Text  -- ^ "base" or "extended"
+  , caseHandlers      :: Text  -- ^ "base", "extended" or "mrtr"
   , caseNotifications :: Bool
   }
 
@@ -205,11 +234,14 @@ runCase :: GoldenCase -> BSL.ByteString -> IO Value
 runCase gc raw = do
   jsonValue <- either (fail . ("request does not parse: " ++)) pure (eitherDecode raw)
   message <- either (fail . ("request is not JSON-RPC: " ++)) pure (parseJsonRpcMessage jsonValue)
-  let handlers = if caseHandlers gc == "extended" then extendedHandlers else goldenHandlers
+  let handlers = case caseHandlers gc of
+        "extended" -> extendedHandlers
+        "mrtr"     -> mrtrHandlers
+        _          -> goldenHandlers
       support = if caseNotifications gc
         then NotificationSupport { supportsLegacyPush = True, supportsListen = True }
         else noNotificationSupport
-  maybeResponse <- handleMcpMessage goldenServerInfo defaultCacheHints support (\_ -> pure ()) handlers anonymousContext message
+  maybeResponse <- handleMcpMessage goldenServerInfo defaultCacheHints testStateCodec support (\_ -> pure ()) handlers anonymousContext message
   case maybeResponse of
     Just responseMsg -> pure $ encodeJsonRpcMessage responseMsg
     Nothing          -> fail "expected a response"
@@ -229,7 +261,7 @@ goldenCase gc =
         fixtureBytes <- BSL.readFile responsePath
         case eitherDecode fixtureBytes :: Either String Value of
           Left err      -> expectationFailure $ "fixture does not parse: " ++ err
-          Right fixture -> actual `shouldBe` fixture
+          Right fixture -> matchOpaque fixture actual `shouldBe` fixture
 
 spec :: Spec
 spec = describe "Golden wire-format fixtures" $ do

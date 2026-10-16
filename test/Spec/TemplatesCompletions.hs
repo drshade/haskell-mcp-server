@@ -15,6 +15,7 @@ import MCP.Server.Derive
 import MCP.Server.Handlers (handleMcpMessage)
 import MCP.Server.JsonRpc
 import Test.Hspec
+import TestHelpers (testStateCodec)
 import TestTypes
 
 templResourceHandlers :: (ResourceListHandler, ResourceReadHandler)
@@ -24,13 +25,13 @@ templTemplates :: ResourceTemplateListHandler
 templTemplates = $(deriveResourceTemplatesWithDescription ''TemplResource
   [("MemberProfile", "A member's profile"), ("OrderItem", "One item of an order")])
 
-readUri :: String -> IO (Either Error ResourceContent)
+readUri :: String -> IO (Either Error (Outcome ResourceContent))
 readUri s = case parseURI s of
   Just uri -> snd templResourceHandlers anonCtx uri
   Nothing  -> fail ("bad test URI: " ++ s)
 
-expectText :: Either Error ResourceContent -> Text -> Expectation
-expectText (Right (ResourceText _ _ content)) expected = content `shouldBe` expected
+expectText :: Either Error (Outcome ResourceContent) -> Text -> Expectation
+expectText (Right (Complete (ResourceText _ _ content))) expected = content `shouldBe` expected
 expectText other expected =
   expectationFailure $ "Expected ResourceText '" ++ T.unpack expected ++ "' but got: " ++ show other
 
@@ -51,7 +52,7 @@ runReq :: McpServerHandlers -> Text -> Maybe Value -> IO (Maybe JsonRpcMessage)
 runReq handlers method params =
   handleMcpMessage
     (McpServerInfo "T" "1" "")
-    defaultCacheHints
+    defaultCacheHints testStateCodec
     noNotificationSupport
     (\_ -> pure ())
     handlers

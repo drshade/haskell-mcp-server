@@ -47,6 +47,7 @@ import           System.IO                (hPutStrLn, stderr)
 import           MCP.Server.Handlers
 import           MCP.Server.JsonRpc
 import           MCP.Server.Notifications
+import           MCP.Server.RequestState (StateCodec, ephemeralStateCodec)
 import           MCP.Server.Protocol (allVersions, modernVersions,
                                       supportedVersions)
 import           MCP.Server.Types
@@ -81,6 +82,12 @@ data HttpConfig = HttpConfig
   , httpCacheHints :: CacheHints
       -- ^ Cacheability hints stamped onto modern (2026-07-28+) list/read
       --   results.
+  , httpStateCodec :: Maybe StateCodec
+      -- ^ Seals the @requestState@ of multi round-trip requests (see
+      --   "MCP.Server.RequestState"). 'Nothing' uses a random key created
+      --   by 'mcpApplication', which only that application can open: a
+      --   deployment with several instances must configure a shared key
+      --   with 'MCP.Server.RequestState.aeadStateCodec'.
   , httpNotifications :: Maybe NotificationSource
       -- ^ When configured, @subscriptions\/listen@ (2026-07-28) is served as
       --   a long-lived SSE stream delivering the change notifications the
@@ -100,6 +107,7 @@ defaultHttpConfig = HttpConfig
   , httpAuthorize = Nothing
   , httpAllowedOrigins = Nothing
   , httpCacheHints = defaultCacheHints
+  , httpStateCodec = Nothing
   , httpNotifications = Nothing
   }
 
@@ -147,7 +155,8 @@ transportRunHttp config serverInfo handlers = do
                  Warp.defaultSettings
 
   putStrLn $ "Starting MCP HTTP server on " ++ httpHost config ++ ":" ++ show (httpPort config) ++ httpEndpoint config
-  Warp.runSettings settings (mcpApplication config serverInfo handlers)
+  app <- mcpApplication config serverInfo handlers
+  Warp.runSettings settings app
 
 -- | The MCP endpoint as a plain WAI 'Wai.Application', for embedding into
 -- an existing WAI stack (your own Warp settings, TLS, middleware, or a
@@ -160,8 +169,17 @@ transportRunHttp config serverInfo handlers = do
 -- Origin validation and bearer authentication run per 'httpAllowedOrigins'
 -- and 'httpAuthorize', and @subscriptions\/listen@ streams work as long as
 -- the surrounding stack does not buffer streaming responses.
-mcpApplication :: HttpConfig -> McpServerInfo -> McpServerHandlers -> Wai.Application
-mcpApplication config serverInfo handlers req respond0 = do
+--
+-- Building the application creates the 'httpStateCodec' default (a random
+-- key) when none is configured, so build it once and serve every request
+-- with the same application.
+mcpApplication :: HttpConfig -> McpServerInfo -> McpServerHandlers -> IO Wai.Application
+mcpApplication config serverInfo handlers = do
+  codec <- maybe ephemeralStateCodec pure (httpStateCodec config)
+  pure (mcpApplicationWith codec config serverInfo handlers)
+
+mcpApplicationWith :: StateCodec -> HttpConfig -> McpServerInfo -> McpServerHandlers -> Wai.Application
+mcpApplicationWith codec config serverInfo handlers req respond0 = do
   -- Log the request
   logVerbose config $ "HTTP " ++ show (Wai.requestMethod req) ++ " " ++ T.unpack (TE.decodeUtf8 $ Wai.rawPathInfo req)
 
@@ -206,7 +224,7 @@ mcpApplication config serverInfo handlers req respond0 = do
           let ctx = anonymousContext { clientToken = bearerToken req, clientPrincipal = principal }
           -- Check if this is our MCP endpoint
           if TE.decodeUtf8 (Wai.rawPathInfo req) == T.pack (httpEndpoint config)
-            then handleMcpRequest config serverInfo handlers ctx req respond
+            then handleMcpRequest codec config serverInfo handlers ctx req respond
             else respond $ Wai.responseLBS status404 [("Content-Type", "text/plain")] "Not Found"
 
 -- | Whether the request passes the configured Origin policy: with no policy
@@ -231,8 +249,8 @@ bearerToken req = do
     else Nothing
 
 -- | Handle MCP requests according to Streamable HTTP specification
-handleMcpRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleMcpRequest config serverInfo handlers ctx req respond = do
+handleMcpRequest :: StateCodec -> HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Wai.Request -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleMcpRequest codec config serverInfo handlers ctx req respond = do
   -- Read the POST body up front: the request era and header validation both
   -- depend on it. A body declaring a modern protocol revision in _meta gets
   -- the 2026-07-28 header validation (header/body match, Mcp-Method,
@@ -264,10 +282,10 @@ handleMcpRequest config serverInfo handlers ctx req respond = do
           -- but only for dispatchable request methods, so unknown methods
           -- keep their 404 and notification bodies keep their 202
           | wantsStreamingResponse peek
-          -> handleStreamingRequest config serverInfo handlers ctx body respond
+          -> handleStreamingRequest codec config serverInfo handlers ctx body respond
           | otherwise -> do
               logVerbose config $ "Received POST body (" ++ show (BSL.length body) ++ " bytes): " ++ take 200 (show body)
-              handleJsonRpcRequest config serverInfo handlers ctx modern body respond
+              handleJsonRpcRequest codec config serverInfo handlers ctx modern body respond
 
     -- OPTIONS for CORS preflight
     "OPTIONS" -> respond $ Wai.responseLBS
@@ -470,8 +488,8 @@ handleSubscriptionsListen config src body respond =
 -- doubles as the disconnect detector: when the client closes the stream the
 -- next keep-alive write throws, the race cancels the handler task, and
 -- nothing further is produced for the request.
-handleStreamingRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleStreamingRequest config serverInfo handlers ctx body respond =
+handleStreamingRequest :: StateCodec -> HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleStreamingRequest codec config serverInfo handlers ctx body respond =
   respond $ Wai.responseStream status200 sseHeaders $ \write flush -> do
     -- One writer at a time, and a cancellation arriving mid-write cannot
     -- split an event in half
@@ -501,7 +519,7 @@ handleStreamingRequest config serverInfo handlers ctx body respond =
                 threadDelay 5000000
                 sendChunk $ B.byteString ": keep-alive\n\n"
           outcome <- race
-            (handleMcpMessage serverInfo (httpCacheHints config)
+            (handleMcpMessage serverInfo (httpCacheHints config) codec
               (httpNotifSupport config) emit handlers ctx message)
             keepAlive
           case outcome of
@@ -510,8 +528,8 @@ handleStreamingRequest config serverInfo handlers ctx body respond =
             Right ()                -> pure ()
 
 -- | Handle JSON-RPC request from HTTP body
-handleJsonRpcRequest :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Bool -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleJsonRpcRequest config serverInfo handlers ctx modern body respond = do
+handleJsonRpcRequest :: StateCodec -> HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Bool -> BSL.ByteString -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleJsonRpcRequest codec config serverInfo handlers ctx modern body respond = do
   case eitherDecode body of
     Left err -> do
       hPutStrLn stderr $ "JSON parse error: " ++ err
@@ -524,11 +542,11 @@ handleJsonRpcRequest config serverInfo handlers ctx modern body respond = do
           , errorData = Nothing
           })
 
-    Right jsonValue -> handleSingleJsonRpc config serverInfo handlers ctx modern jsonValue respond
+    Right jsonValue -> handleSingleJsonRpc codec config serverInfo handlers ctx modern jsonValue respond
 
 -- | Handle a single JSON-RPC message
-handleSingleJsonRpc :: HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Bool -> Value -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
-handleSingleJsonRpc config serverInfo handlers ctx modern jsonValue respond = do
+handleSingleJsonRpc :: StateCodec -> HttpConfig -> McpServerInfo -> McpServerHandlers -> ClientContext -> Bool -> Value -> (Wai.Response -> IO Wai.ResponseReceived) -> IO Wai.ResponseReceived
+handleSingleJsonRpc codec config serverInfo handlers ctx modern jsonValue respond = do
   case parseJsonRpcMessage jsonValue of
     Left err -> do
       hPutStrLn stderr $ "JSON-RPC parse error: " ++ err
@@ -545,7 +563,7 @@ handleSingleJsonRpc config serverInfo handlers ctx modern jsonValue respond = do
       logVerbose config $ "Processing HTTP message: " ++ show (getMessageSummary message)
       -- Single-JSON responses have no channel for request-scoped
       -- notifications; requests that want them take the streaming path.
-      maybeResponse <- handleMcpMessage serverInfo (httpCacheHints config)
+      maybeResponse <- handleMcpMessage serverInfo (httpCacheHints config) codec
         (httpNotifSupport config) (\_ -> pure ()) handlers ctx message
 
       case maybeResponse of

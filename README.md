@@ -415,10 +415,14 @@ as `Map Text Value`:
 
 ```haskell
 promptListHandler :: ClientContext -> IO [PromptDefinition]
-promptGetHandler  :: ClientContext -> PromptName -> Map Text Text -> IO (Either Error PromptResult)
+promptGetHandler  :: ClientContext -> PromptName -> Map Text Text -> IO (Either Error (Outcome PromptResult))
 
 handlers = noHandlers { prompts = Just (promptListHandler, promptGetHandler) }
 ```
+
+`tools/call`, `prompts/get` and `resources/read` handlers return an
+`Outcome`: `Complete result`, or a request for input (see
+[Asking the user for input](#asking-the-user-for-input)).
 
 Tool schemas built by hand can use `SchemaRaw` for anything the typed
 shapes cannot express — `null`, `anyOf`, `$defs` and `$ref`, numeric bounds
@@ -495,13 +499,17 @@ own Warp settings, TLS, middleware or router:
 import MCP.Server (mcpApplication, defaultHttpConfig)
 import qualified Network.Wai.Handler.Warp as Warp
 
-main = Warp.runSettings mySettings $ \req respond ->
-    -- route /mcp to the MCP endpoint, everything else to your app
-    mcpApplication defaultHttpConfig serverInfo handlers req respond
+main = do
+    mcp <- mcpApplication defaultHttpConfig serverInfo handlers
+    Warp.runSettings mySettings $ \req respond ->
+        -- route /mcp to the MCP endpoint, everything else to your app
+        mcp req respond
 ```
 
-`httpPort` and `httpHost` are ignored when embedding; the endpoint path,
-Origin validation, bearer auth and streaming all apply as usual.
+Build the application once: it holds the key that protects multi
+round-trip state. `httpPort` and `httpHost` are ignored when embedding; the
+endpoint path, Origin validation, bearer auth and streaming all apply as
+usual.
 
 ## Long-running tools
 
@@ -559,6 +567,55 @@ waits for them.
 Requests are served concurrently on both transports. Handlers touching shared
 mutable state must synchronize with `MVar`, `STM` or similar.
 
+## Asking the user for input
+
+A `tools/call`, `prompts/get` or `resources/read` handler can stop and ask
+the client for input — a form for the user to fill in, or a URL to visit —
+using the 2026-07-28 multi round-trip requests. The handler returns
+`InputRequired` with its requests and some state of its own; the client
+asks the user and retries the request, and the handler runs again with
+the answers in `clientInputResponses` and its state in
+`clientRequestState`:
+
+```haskell
+deploy :: ToolCallHandler
+deploy ctx _ _ = pure $ Right $
+  case Map.lookup "confirm" (clientInputResponses ctx) of
+    Nothing | clientSupportsInput ctx question ->
+      InputRequired (Map.singleton "confirm" question) (Just "step-1")
+    Just (ElicitResponse ElicitAccept _) ->
+      Complete (toolResult [ContentText "Deployed"])
+    _ -> Complete (toolError "Not confirmed")
+  where
+    question = ElicitForm "Deploy to production?"
+      (schema (SchemaObject [("ok", schema SchemaBoolean)] ["ok"]))
+```
+
+`clientSupportsInput` says whether the client can answer: it must speak
+2026-07-28 and have declared the elicitation mode (or sampling, or roots)
+in question. Asking a client that cannot answer is reported as an internal
+error, so check first and fall back.
+
+The library protects the state the client carries between rounds: it is
+encrypted, and bound to the caller, the request's arguments and an expiry
+(60 minutes by default), and a retry presenting tampered, expired or
+misdirected state is rejected before the handler runs. By default the key
+is random per process, which suits stdio and a single HTTP instance. HTTP
+deployments with several instances must share a key:
+
+```haskell
+main = do
+  secret <- readSecret                                  -- 32 bytes, shared by every instance
+  key <- maybe (fail "state key must be 32 bytes") pure (stateKey "2026-10" secret)
+  runMcpServerHttpWithConfig defaultHttpConfig
+    { httpStateCodec = Just (aeadStateCodec key []) }   -- to rotate: aeadStateCodec new [old]
+    serverInfo handlers
+```
+
+Derived handlers will be able to ask questions as straight-line code in an
+`Ask` monad, with forms derived from records; see
+[ADR 0009](specs/ADR_0009_mrtr_input_required.md).
+
 ## Change notifications
 
 Servers whose tool, prompt or resource lists change at runtime can push
@@ -596,11 +653,12 @@ capabilities are advertised only where delivery is possible:
 | Progress and per-request logging | ✅ | ✅ |
 | Cancellation | ✅ | ✅ |
 | Change notifications | stdio only | `subscriptions/listen` (stdio and HTTP) |
+| Asking for input (multi round-trip requests) | — | `input_required` results, protected `requestState` |
 | Result typing and cacheability hints | — | `resultType`, `httpCacheHints` |
 | HTTP request-metadata headers | — | `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` validated |
 
-Design decisions and planned work (input-required results, OAuth resource
-metadata, pagination, the tasks extension) live as ADRs under
+Design decisions and planned work (derived handlers that ask for input,
+OAuth resource metadata, pagination, the tasks extension) live as ADRs under
 [`specs/`](specs/README.md), ordered by [`specs/ROADMAP.md`](specs/ROADMAP.md).
 
 ## Examples

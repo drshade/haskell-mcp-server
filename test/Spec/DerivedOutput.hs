@@ -19,7 +19,7 @@ weatherHandlers :: (ToolListHandler, ToolCallHandler)
 weatherHandlers = $(deriveToolHandlerWithOutputDescription ''WeatherTool 'handleWeatherTool ''WeatherReport
   [ ("GetWeather", "Current weather"), ("wrTemperature", "Degrees Celsius") ])
 
-callWeather :: Text -> [(Text, Value)] -> IO (Either Error ToolResult)
+callWeather :: Text -> [(Text, Value)] -> IO (Either Error (Outcome ToolResult))
 callWeather name args = snd weatherHandlers anonCtx name (valueArgs args)
 
 -- The serialized form the derivation guarantees for 'sampleReport'
@@ -64,7 +64,7 @@ spec = describe "Derived structured output" $ do
   describe "ToolOutput results" $ do
     it "serializes the typed value into structuredContent with a matching text block" $ do
       result <- callWeather "get_weather" [("wtCity", String "Cape Town")]
-      case result of
+      case completed result of
         Right tr -> do
           toolResultIsError tr `shouldBe` False
           toolResultStructured tr `shouldBe` Just (expectedReport "Cape Town" (Just 60))
@@ -77,26 +77,26 @@ spec = describe "Derived structured output" $ do
 
     it "renders the text block canonically (sorted keys, build-plan independent)" $ do
       result <- callWeather "get_weather" [("wtCity", String "Cape Town")]
-      case result of
+      case completed result of
         Right tr -> toolResultContent tr `shouldBe`
           [ContentText "{\"wrAlerts\":[\"wind advisory for Cape Town\"],\"wrHumidity\":60,\"wrSky\":\"sky_cloudy\",\"wrTemperature\":21,\"wrWind\":{\"windGusting\":false,\"windSpeedKph\":12.5}}"]
         Left err -> expectationFailure $ "expected result, got error: " ++ show err
 
     it "omits Nothing fields from the serialized value" $ do
       result <- callWeather "custom_report" [("wtRegion", String "Karoo")]
-      case result of
+      case completed result of
         Right tr -> toolResultStructured tr `shouldBe` Just (expectedReport "Karoo" Nothing)
         Left err -> expectationFailure $ "expected result, got error: " ++ show err
 
     it "keeps caller-supplied content blocks with ToolOutputWith" $ do
       result <- callWeather "custom_report" [("wtRegion", String "Karoo")]
-      case result of
+      case completed result of
         Right tr -> toolResultContent tr `shouldBe` [ContentText "Report for Karoo"]
         Left err -> expectationFailure $ "expected result, got error: " ++ show err
 
     it "reports ToolOutputError as an isError result" $ do
       result <- callWeather "broken_station" [("wtStation", String "X1")]
-      case result of
+      case completed result of
         Right tr -> do
           toolResultIsError tr `shouldBe` True
           toolResultStructured tr `shouldBe` Nothing
@@ -105,7 +105,7 @@ spec = describe "Derived structured output" $ do
 
     it "passes ToolOutputRaw through untouched" $ do
       result <- callWeather "plain_forecast" [("wtNote", String "sunny")]
-      case result of
+      case completed result of
         Right tr -> do
           toolResultStructured tr `shouldBe` Nothing
           toolResultContent tr `shouldBe` [ContentText "sunny"]

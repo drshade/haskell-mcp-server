@@ -1,0 +1,1 @@
+{"error":{"code":-32603,"message":"Internal error: the handler requested input, which the client's protocol revision does not support"},"id":43,"jsonrpc":"2.0"}

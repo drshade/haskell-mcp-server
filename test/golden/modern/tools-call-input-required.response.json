@@ -1,0 +1,1 @@
+{"id":40,"jsonrpc":"2.0","result":{"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"Golden Server","version":"1.0.0"}},"inputRequests":{"proceed":{"method":"elicitation/create","params":{"message":"Proceed?","mode":"form","requestedSchema":{"properties":{"ok":{"type":"boolean"}},"required":["ok"],"type":"object"}}}},"requestState":"<opaque>","resultType":"input_required"}}
