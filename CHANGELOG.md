@@ -1,6 +1,6 @@
 # Revision history for mcp-server
 
-## 0.3.0.0 - ???
+## 0.3.0.0 - 2026-10-16
 
 * Raw JSON Schema keywords (ADR 0014): `SchemaRaw` is a new `SchemaType`
   that serializes its keywords as given, for schemas the other shapes
