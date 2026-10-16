@@ -37,6 +37,12 @@ Both landed in 0.2.0.1.
    (sequenced immediately after ADR_0007, whose execution model it
    builds on, and shipped in the same release).
 
+## Raw schemas *(landed, pending 0.3.0.0)*
+
+- [ADR_0014 — Raw JSON Schema keywords](ADR_0014_raw_schemas.md) — **Landed**.
+  A new `SchemaType` constructor, so the next release is 0.3.0.0 under
+  the PVP; other breaking work (such as ADR_0009) can batch into it.
+
 ## Batch 3 — interactivity
 
 5. [ADR_0009 — MRTR: input_required results](ADR_0009_mrtr_input_required.md).
