@@ -18,6 +18,7 @@ import MCP.Server.Transport.Http (BodyPeek (..), decodeSentinel, peekBody,
                                   wantsStreamingResponse)
 import qualified Network.Wai as Wai
 import Test.Hspec
+import TestHelpers (testStateCodec)
 
 testServerInfo :: McpServerInfo
 testServerInfo = McpServerInfo
@@ -32,13 +33,13 @@ testHandlers :: McpServerHandlers
 testHandlers = noHandlers
   { tools = Just
       ( \_ctx -> pure []
-      , \ctx _name _args -> pure $ Right $ toToolResult
+      , \ctx _name _args -> pure $ Right $ Complete $ toToolResult
           ("version=" <> maybe "none" id (clientProtocolVersion ctx))
       )
   }
 
 run :: JsonRpcMessage -> IO (Maybe JsonRpcMessage)
-run = handleMcpMessage testServerInfo defaultCacheHints noNotificationSupport (\_ -> pure ()) testHandlers anonymousContext
+run = handleMcpMessage testServerInfo defaultCacheHints testStateCodec noNotificationSupport (\_ -> pure ()) testHandlers anonymousContext
 
 request :: Text -> Maybe Value -> JsonRpcMessage
 request method params = JsonRpcMessageRequest $ JsonRpcRequest

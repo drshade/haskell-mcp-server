@@ -47,8 +47,11 @@ import           Data.Text              (Text)
 import qualified Data.Text              as T
 import           System.IO              (hPutStrLn, stderr)
 
+import           MCP.Server.Internal.InputRound (beginRound,
+                                                 inputRequiredResult)
 import           MCP.Server.JsonRpc
 import           MCP.Server.Protocol
+import           MCP.Server.RequestState        (StateCodec)
 import           MCP.Server.Types
 
 -- | Convert JSON Value to Text representation suitable for handlers
@@ -156,15 +159,19 @@ guardHandler rid action = do
             }
 
 -- | Stamp the modern-revision result envelope onto a successful response:
--- @resultType: \"complete\"@, the server's identity in result @_meta@, and
--- (for cacheable methods) @ttlMs@ and @cacheScope@. Error responses and
--- legacy responses pass through untouched.
+-- @resultType: \"complete\"@ (unless the result already carries one, as
+-- an @input_required@ result does), the server's identity in result
+-- @_meta@, and (for complete results of cacheable methods) @ttlMs@ and
+-- @cacheScope@. Error responses and legacy responses pass through
+-- untouched.
 decorateModern :: McpServerInfo -> CacheHints -> Text -> JsonRpcResponse -> JsonRpcResponse
 decorateModern serverInfo hints method resp = case responseResult resp of
   Just (Object o) -> resp { responseResult = Just $ Object $ decorate o }
   _               -> resp
   where
-    decorate = insertCache . KM.insert "resultType" (String "complete") . insertMeta
+    decorate o = case KM.lookup "resultType" o of
+      Just _  -> insertMeta o
+      Nothing -> insertCache $ KM.insert "resultType" (String "complete") $ insertMeta o
     insertMeta o = KM.insert "_meta" (Object meta) o
       where meta = case KM.lookup "_meta" o of
               Just (Object m) -> KM.insert serverInfoKey serverInfoVal m
@@ -188,19 +195,23 @@ decorateModern serverInfo hints method resp = case responseResult resp of
 -- result envelope; a request that does not is served exactly as before
 -- under the revision negotiated by @initialize@.
 --
+-- @codec@ seals and opens the @requestState@ of multi round-trip requests
+-- (see "MCP.Server.RequestState").
+--
 -- @emit@ is the transport's request-scoped notification sink: progress and
 -- client-log notifications for /this request/ are delivered through it,
 -- interleaved before the response (stdio's shared channel, or the
 -- request's SSE response stream on HTTP).
 handleMcpMessage :: McpServerInfo
                  -> CacheHints
+                 -> StateCodec
                  -> NotificationSupport
                  -> (JsonRpcNotification -> IO ())
                  -> McpServerHandlers
                  -> ClientContext
                  -> JsonRpcMessage
                  -> IO (Maybe JsonRpcMessage)
-handleMcpMessage serverInfo hints notifSupport emit handlers ctx0 (JsonRpcMessageRequest req) = do
+handleMcpMessage serverInfo hints codec notifSupport emit handlers ctx0 (JsonRpcMessageRequest req) = do
   let params = requestParams req
       declaredVersion = metaProtocolVersion params
   case declaredVersion of
@@ -235,12 +246,12 @@ handleMcpMessage serverInfo hints notifSupport emit handlers ctx0 (JsonRpcMessag
         "ping" -> handlePing req
         "server/discover" -> handleServerDiscover serverInfo notifSupport handlers req
         "prompts/list" -> handlePromptsList handlers ctx req
-        "prompts/get" -> handlePromptsGet handlers ctx req
+        "prompts/get" -> handlePromptsGet codec handlers ctx req
         "resources/list" -> handleResourcesList handlers ctx req
-        "resources/read" -> handleResourcesRead handlers ctx req
+        "resources/read" -> handleResourcesRead codec handlers ctx req
         "resources/templates/list" -> handleResourcesTemplatesList handlers ctx req
         "tools/list" -> handleToolsList handlers ctx req
-        "tools/call" -> handleToolsCall handlers ctx req
+        "tools/call" -> handleToolsCall codec handlers ctx req
         "completion/complete" -> handleCompletionComplete handlers ctx req
         method -> return $ makeErrorResponse (requestId req) $ JsonRpcError
           { errorCode = -32601
@@ -252,7 +263,7 @@ handleMcpMessage serverInfo hints notifSupport emit handlers ctx0 (JsonRpcMessag
             else response
       return $ Just $ JsonRpcMessageResponse response'
 
-handleMcpMessage _ _ _ _ _ _ (JsonRpcMessageNotification notif) = do
+handleMcpMessage _ _ _ _ _ _ _ (JsonRpcMessageNotification notif) = do
   case notificationMethod notif of
     "notifications/initialized" ->
       hPutStrLn stderr "Received initialized notification - server is ready for operation"
@@ -260,7 +271,7 @@ handleMcpMessage _ _ _ _ _ _ (JsonRpcMessageNotification notif) = do
       hPutStrLn stderr $ "Received unknown notification: " ++ T.unpack (notificationMethod notif)
   return Nothing
 
-handleMcpMessage _ _ _ _ _ _ (JsonRpcMessageResponse _) =
+handleMcpMessage _ _ _ _ _ _ _ (JsonRpcMessageResponse _) =
   return Nothing
 
 -- | The 'reportProgress' action for a request: emits
@@ -397,8 +408,8 @@ handlePromptsList handlers ctx req =
       return $ makeSuccessResponse (requestId req) (toJSON response)
 
 -- | Handle prompts/get request
-handlePromptsGet :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
-handlePromptsGet handlers ctx req =
+handlePromptsGet :: StateCodec -> McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
+handlePromptsGet codec handlers ctx req =
   case prompts handlers of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
       { errorCode = -32601
@@ -423,20 +434,13 @@ handlePromptsGet handlers ctx req =
               -- Prompt arguments are string-valued per the MCP spec; flatten
               -- any non-string values a lenient client may have sent.
               let args = maybe Map.empty (fmap jsonValueToText) (promptsGetArguments getReq)
-              result <- getHandler ctx (promptsGetName getReq) args
-              case result of
-                Left err -> return $ makeErrorResponse (requestId req) $ JsonRpcError
-                  { errorCode = errorCodeFromMcpError err
-                  , errorMessage = errorMessageFromMcpError err
-                  , errorData = Nothing
-                  }
-                Right promptRes -> do
-                  let response = PromptsGetResponse
-                        { promptsGetDescription = promptResultDescription promptRes
-                        , promptsGetMessages = promptResultMessages promptRes
-                        , promptsGetMeta = Nothing
-                        }
-                  return $ makeSuccessResponse (requestId req) (toJSON response)
+              runRound codec ctx req
+                (\c -> getHandler c (promptsGetName getReq) args)
+                (\promptRes -> toJSON PromptsGetResponse
+                    { promptsGetDescription = promptResultDescription promptRes
+                    , promptsGetMessages = promptResultMessages promptRes
+                    , promptsGetMeta = Nothing
+                    })
 
 -- | Handle resources/list request
 handleResourcesList :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
@@ -461,8 +465,8 @@ handleResourcesList handlers ctx req =
       return $ makeSuccessResponse (requestId req) (toJSON response)
 
 -- | Handle resources/read request
-handleResourcesRead :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
-handleResourcesRead handlers ctx req =
+handleResourcesRead :: StateCodec -> McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
+handleResourcesRead codec handlers ctx req =
   case resources handlers of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
       { errorCode = -32601
@@ -483,19 +487,12 @@ handleResourcesRead handlers ctx req =
               , errorMessage = "Invalid parameters: " <> T.pack err
               , errorData = Nothing
               }
-            Success readReq -> do
-              result <- readHandler ctx (resourcesReadUri readReq)
-              case result of
-                Left err -> return $ makeErrorResponse (requestId req) $ JsonRpcError
-                  { errorCode = errorCodeFromMcpError err
-                  , errorMessage = errorMessageFromMcpError err
-                  , errorData = Nothing
-                  }
-                Right resourceContent -> do
-                  let response = ResourcesReadResponse
-                        { resourcesReadContents = [resourceContent]
-                        }
-                  return $ makeSuccessResponse (requestId req) (toJSON response)
+            Success readReq ->
+              runRound codec ctx req
+                (\c -> readHandler c (resourcesReadUri readReq))
+                (\resourceContent -> toJSON ResourcesReadResponse
+                    { resourcesReadContents = [resourceContent]
+                    })
 
 -- | Handle resources/templates/list request
 handleResourcesTemplatesList :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
@@ -568,8 +565,8 @@ handleToolsList handlers ctx req =
       return $ makeSuccessResponse (requestId req) (toJSON response)
 
 -- | Handle tools/call request
-handleToolsCall :: McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
-handleToolsCall handlers ctx req =
+handleToolsCall :: StateCodec -> McpServerHandlers -> ClientContext -> JsonRpcRequest -> IO JsonRpcResponse
+handleToolsCall codec handlers ctx req =
   case tools handlers of
     Nothing -> return $ makeErrorResponse (requestId req) $ JsonRpcError
       { errorCode = -32601
@@ -593,21 +590,44 @@ handleToolsCall handlers ctx req =
             Success callReq -> do
               -- Tool arguments are passed through as full JSON values.
               let args = fromMaybe Map.empty (toolsCallArguments callReq)
-              result <- callHandler ctx (toolsCallName callReq) args
-              case result of
-                Left err -> return $ makeErrorResponse (requestId req) $ JsonRpcError
-                  { errorCode = errorCodeFromMcpError err
-                  , errorMessage = errorMessageFromMcpError err
-                  , errorData = Nothing
-                  }
-                Right toolRes -> do
-                  let response = ToolsCallResponse
-                        { toolsCallContent = toolResultContent toolRes
-                        , toolsCallIsError = if toolResultIsError toolRes then Just True else Nothing
-                        , toolsCallStructuredContent = toolResultStructured toolRes
-                        , toolsCallMeta = toolResultMeta toolRes
-                        }
-                  return $ makeSuccessResponse (requestId req) (toJSON response)
+              runRound codec ctx req
+                (\c -> callHandler c (toolsCallName callReq) args)
+                (\toolRes -> toJSON ToolsCallResponse
+                    { toolsCallContent = toolResultContent toolRes
+                    , toolsCallIsError = if toolResultIsError toolRes then Just True else Nothing
+                    , toolsCallStructuredContent = toolResultStructured toolRes
+                    , toolsCallMeta = toolResultMeta toolRes
+                    })
+
+-- | Run a handler that may ask the client for input (multi round-trip
+-- requests): read a retry's answers and verified state into the context,
+-- run the handler, and answer with its result, its error, or an
+-- @input_required@ result.
+runRound :: StateCodec
+         -> ClientContext
+         -> JsonRpcRequest
+         -> (ClientContext -> IO (Either Error (Outcome a)))
+         -> (a -> Value)
+         -> IO JsonRpcResponse
+runRound codec ctx0 req run render = do
+  let rid = requestId req
+      method = requestMethod req
+      params = requestParams req
+  prepared <- beginRound codec method params ctx0
+  case prepared of
+    Left err -> pure (makeErrorResponse rid err)
+    Right ctx -> do
+      result <- run ctx
+      case result of
+        Left err -> pure $ makeErrorResponse rid JsonRpcError
+          { errorCode = errorCodeFromMcpError err
+          , errorMessage = errorMessageFromMcpError err
+          , errorData = Nothing
+          }
+        Right (Complete a) -> pure (makeSuccessResponse rid (render a))
+        Right (InputRequired requests state) -> do
+          answer <- inputRequiredResult codec method params ctx requests state
+          pure (either (makeErrorResponse rid) (makeSuccessResponse rid) answer)
 
 -- | Convert MCP error to JSON-RPC error code
 errorCodeFromMcpError :: Error -> Int

@@ -19,6 +19,16 @@ module MCP.Server
   , defaultHttpConfig
   , mcpApplication
 
+    -- * Request state (multi round-trip requests)
+  , StateCodec(..)
+  , StateError(..)
+  , StateKey
+  , stateKey
+  , stateKeyId
+  , aeadStateCodec
+  , ephemeralStateCodec
+  , defaultStateLifetime
+
     -- * Change Notifications
   , McpNotifier(..)
   , NotificationSource
@@ -35,6 +45,7 @@ import           MCP.Server.Transport.Stdio (StdioConfig (..), defaultStdioConfi
                                              transportRunStdioWithConfig)
 import           MCP.Server.Transport.Http (HttpConfig(..), transportRunHttp, defaultHttpConfig,
                                             mcpApplication)
+import           MCP.Server.RequestState
 import           MCP.Server.Types
 
 -- | Run an MCP server using STDIO transport

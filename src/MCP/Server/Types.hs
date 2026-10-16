@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor     #-}
 {-# LANGUAGE DeriveGeneric     #-}
 {-# LANGUAGE DeriveLift        #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -77,6 +78,13 @@ module MCP.Server.Types
   , ToolCapabilities(..)
   , CompletionCapabilities(..)
   , LoggingCapabilities(..)
+
+    -- * Asking the client for input
+  , Outcome(..)
+  , InputRequest(..)
+  , InputResponse(..)
+  , ElicitAction(..)
+  , clientSupportsInput
 
     -- * Handler Types
   , PromptListHandler
@@ -853,6 +861,13 @@ data ClientContext = ClientContext
       --   (@notifications\/message@). A no-op unless the request declared
       --   @io.modelcontextprotocol\/logLevel@ (the spec forbids emitting
       --   otherwise); messages below the declared level are dropped.
+  , clientInputResponses :: Map Text InputResponse
+      -- ^ On a retry after 'InputRequired': the client's answers, keyed as
+      --   the handler keyed its requests. Empty otherwise. Only the latest
+      --   round's answers arrive; carry earlier ones in the state.
+  , clientRequestState :: Maybe Text
+      -- ^ On a retry after 'InputRequired': the state the handler returned,
+      --   verified and decrypted by the library. 'Nothing' otherwise.
   }
 
 -- | A context carrying no transport- or request-level information: what
@@ -866,6 +881,8 @@ anonymousContext = ClientContext
   , clientCapabilities = Nothing
   , reportProgress = \_ _ _ -> pure ()
   , logToClient = \_ _ -> pure ()
+  , clientInputResponses = mempty
+  , clientRequestState = Nothing
   }
 
 -- | Cacheability hints stamped onto modern (2026-07-28+) list/read results,
@@ -903,6 +920,123 @@ noNotificationSupport = NotificationSupport
   , supportsListen = False
   }
 
+-- | What a handler that may ask the client for input produces
+-- (@tools\/call@, @prompts\/get@ and @resources\/read@, the requests the
+-- specification allows to do so).
+--
+-- 'InputRequired' answers the request with an @input_required@ result:
+-- the client gathers the requested input and retries the request, and the
+-- handler then sees the answers in 'clientInputResponses' and its state in
+-- 'clientRequestState'. The library protects the state (see
+-- "MCP.Server.RequestState"), so a handler can put anything in it.
+data Outcome a
+  = Complete a
+    -- ^ The request is done.
+  | InputRequired (Map Text InputRequest) (Maybe Text)
+    -- ^ Requests for the client, keyed by ids the handler chooses (the
+    --   same keys come back in 'clientInputResponses'), and state to
+    --   receive back in 'clientRequestState' on the retry.
+  deriving (Show, Eq, Functor)
+
+-- | A request for the client to fulfil before retrying.
+data InputRequest
+  = ElicitForm Text Schema
+    -- ^ Ask the user to fill in a form (@elicitation\/create@ in @form@
+    --   mode): the message, and the schema of an object whose properties
+    --   are strings, numbers, booleans or enumerations.
+  | ElicitUrl Text URI
+    -- ^ Send the user to a URL to complete an interaction out of band
+    --   (@elicitation\/create@ in @url@ mode): the message and the URL.
+  | RawInputRequest Text Value
+    -- ^ Any other request, by method and params, such as
+    --   @sampling\/createMessage@ or @roots\/list@ (both deprecated in
+    --   2026-07-28).
+  deriving (Show, Eq)
+
+instance ToJSON InputRequest where
+  toJSON (ElicitForm message requested) = object
+    [ "method" .= ("elicitation/create" :: Text)
+    , "params" .= object
+        [ "mode" .= ("form" :: Text)
+        , "message" .= message
+        , "requestedSchema" .= requested
+        ]
+    ]
+  toJSON (ElicitUrl message url) = object
+    [ "method" .= ("elicitation/create" :: Text)
+    , "params" .= object
+        [ "mode" .= ("url" :: Text)
+        , "message" .= message
+        , "url" .= show url
+        ]
+    ]
+  toJSON (RawInputRequest method params) = object
+    [ "method" .= method
+    , "params" .= params
+    ]
+
+-- | The client's answer to an 'InputRequest'.
+data InputResponse
+  = ElicitResponse ElicitAction (Maybe (Map Text Value))
+    -- ^ The user's action, and the submitted form content when they
+    --   accepted a form.
+  | RawInputResponse Value
+    -- ^ Any other result, such as a sampling or roots result.
+  deriving (Show, Eq)
+
+-- | How the user responded to an elicitation.
+data ElicitAction
+  = ElicitAccept   -- ^ Submitted the form, or confirmed the action
+  | ElicitDecline  -- ^ Explicitly declined
+  | ElicitCancel   -- ^ Dismissed without choosing
+  deriving (Show, Eq, Ord, Enum, Bounded)
+
+instance FromJSON InputResponse where
+  parseJSON = withObject "InputResponse" $ \o ->
+    case KM.lookup "action" o of
+      Just (String a) | Just action <- lookup a actions ->
+        ElicitResponse action <$> o .:? "content"
+      _ -> pure (RawInputResponse (Object o))
+    where
+      actions =
+        [ ("accept", ElicitAccept)
+        , ("decline", ElicitDecline)
+        , ("cancel", ElicitCancel)
+        ]
+
+-- | Whether the client making this request can fulfil an input request:
+-- it must speak a revision with multi round-trip requests (2026-07-28+)
+-- and have declared the matching capability. Elicitation is declared per
+-- mode; an empty @elicitation@ capability means @form@ only.
+clientSupportsInput :: ClientContext -> InputRequest -> Bool
+clientSupportsInput ctx request = case clientProtocolVersion ctx of
+  Nothing -> False
+  Just _  -> case request of
+    ElicitForm _ _ -> elicitForm
+    ElicitUrl _ _  -> elicitUrl
+    RawInputRequest "elicitation/create" params
+      | modeOf params == Just "url" -> elicitUrl
+      | otherwise                   -> elicitForm
+    RawInputRequest "sampling/createMessage" _ -> declared "sampling"
+    RawInputRequest "roots/list" _             -> declared "roots"
+    RawInputRequest _ _                        -> False
+  where
+    caps = case clientCapabilities ctx of
+      Just (Object o) -> o
+      _               -> KM.empty
+    declared key = KM.member key caps
+    elicitation = case KM.lookup "elicitation" caps of
+      Just (Object e) -> Just e
+      _               -> Nothing
+    elicitForm = case elicitation of
+      Just e -> KM.member "form" e || not (KM.member "url" e)
+      Nothing -> False
+    elicitUrl = maybe False (KM.member "url") elicitation
+    modeOf (Object p) = case KM.lookup "mode" p of
+      Just (String m) -> Just m
+      _               -> Nothing
+    modeOf _ = Nothing
+
 -- | List the available prompts (@prompts\/list@). Every handler receives
 -- the request's t'ClientContext' as its first argument.
 --
@@ -910,19 +1044,19 @@ noNotificationSupport = NotificationSupport
 -- arguments are full JSON values.
 type PromptListHandler = ClientContext -> IO [PromptDefinition]
 -- | Render a prompt from its name and arguments (@prompts\/get@).
-type PromptGetHandler = ClientContext -> PromptName -> Map Text Text -> IO (Either Error PromptResult)
+type PromptGetHandler = ClientContext -> PromptName -> Map Text Text -> IO (Either Error (Outcome PromptResult))
 
 -- | List the available resources (@resources\/list@).
 type ResourceListHandler = ClientContext -> IO [ResourceDefinition]
 -- | Read a resource by URI (@resources\/read@).
-type ResourceReadHandler = ClientContext -> URI -> IO (Either Error ResourceContent)
+type ResourceReadHandler = ClientContext -> URI -> IO (Either Error (Outcome ResourceContent))
 -- | List the resource templates (@resources\/templates\/list@).
 type ResourceTemplateListHandler = ClientContext -> IO [ResourceTemplateDefinition]
 
 -- | List the available tools (@tools\/list@).
 type ToolListHandler = ClientContext -> IO [ToolDefinition]
 -- | Call a tool by name with its JSON arguments (@tools\/call@).
-type ToolCallHandler = ClientContext -> ToolName -> Map Text Value -> IO (Either Error ToolResult)
+type ToolCallHandler = ClientContext -> ToolName -> Map Text Value -> IO (Either Error (Outcome ToolResult))
 
 -- | Completion handler: given what is being completed ('CompletionRef'), the
 -- argument name, the partial value typed so far, and any already-resolved

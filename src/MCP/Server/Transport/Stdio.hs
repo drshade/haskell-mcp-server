@@ -34,6 +34,7 @@ import           MCP.Server.Handlers
 import           MCP.Server.JsonRpc
 import           MCP.Server.Notifications
 import           MCP.Server.Protocol    (modernVersions)
+import           MCP.Server.RequestState (StateCodec, ephemeralStateCodec)
 import           MCP.Server.Types
 
 -- | STDIO transport configuration
@@ -45,6 +46,10 @@ data StdioConfig = StdioConfig
   , stdioCacheHints :: CacheHints
     -- ^ Cacheability hints stamped onto modern (2026-07-28+) list/read
     -- results.
+  , stdioStateCodec :: Maybe StateCodec
+    -- ^ Seals the @requestState@ of multi round-trip requests (see
+    -- "MCP.Server.RequestState"). 'Nothing' uses a random key created when
+    -- the transport starts, which is all a single stdio process needs.
   , stdioNotifications :: Maybe NotificationSource
     -- ^ When configured, change notifications are delivered: modern clients
     -- via @subscriptions\/listen@, legacy clients as spontaneous
@@ -58,6 +63,7 @@ defaultStdioConfig :: StdioConfig
 defaultStdioConfig = StdioConfig
   { stdioVerbose = False
   , stdioCacheHints = defaultCacheHints
+  , stdioStateCodec = Nothing
   , stdioNotifications = Nothing
   }
 
@@ -82,6 +88,8 @@ transportRunStdioWithConfig config serverInfo handlers = do
   -- Ensure UTF-8 encoding for all handles
   hSetEncoding stderr utf8
   hSetEncoding stdout utf8
+
+  codec <- maybe ephemeralStateCodec pure (stdioStateCodec config)
 
   -- Subscription threads, request tasks and the main loop share stdout:
   -- one line at a time.
@@ -171,7 +179,7 @@ transportRunStdioWithConfig config serverInfo handlers = do
     dispatchMessage message = do
       -- Request-scoped notifications (progress, client logs) share the
       -- locked stdout channel, interleaved before the response
-      response <- handleMcpMessage serverInfo (stdioCacheHints config) notifSupport sendNotification handlers anonymousContext message
+      response <- handleMcpMessage serverInfo (stdioCacheHints config) codec notifSupport sendNotification handlers anonymousContext message
       case response of
         Just responseMsg -> do
           logLine $ "Sending response for: " <> T.pack (show (getMessageSummary message))

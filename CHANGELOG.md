@@ -2,6 +2,26 @@
 
 ## 0.3.0.1 - ???
 
+* Multi round-trip requests (ADR 0009, first phase): `tools/call`,
+  `prompts/get` and `resources/read` handlers can ask the client for input
+  by returning `InputRequired`, answered as an `input_required` result
+  (2026-07-28). Retries carry the answers in `clientInputResponses` and the
+  handler's state in `clientRequestState`. `clientSupportsInput` checks
+  the client's protocol revision and declared capabilities.
+* The `requestState` sent to clients is sealed by a `StateCodec`
+  (new module `MCP.Server.RequestState`): ChaCha20-Poly1305, bound to the
+  caller, the request's parameters and an expiry, and verified before the
+  handler runs. The default key is random per process; `stdioStateCodec`
+  and `httpStateCodec` configure a shared key, with rotation.
+* BREAKING: `ToolCallHandler`, `PromptGetHandler` and `ResourceReadHandler`
+  return `Outcome`; hand-written handlers wrap results in `Complete`.
+  Derived handlers are unaffected.
+* BREAKING: `ClientContext` gains `clientInputResponses` and
+  `clientRequestState`; `StdioConfig` and `HttpConfig` gain a state codec
+  field; `handleMcpMessage` and the per-method handlers take a
+  `StateCodec`; `mcpApplication` returns `IO Application`, creating the
+  default key once.
+* New dependencies: `crypton` (1.1.4 to 2.2), `ram` and `time`.
 * Documentation: every module has a header and every export a doc
   comment, and Haddock links that were ambiguous or out of scope are
   fixed. No API changes.

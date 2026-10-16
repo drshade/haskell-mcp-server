@@ -14,6 +14,7 @@ import MCP.Server
 import MCP.Server.Handlers (handleMcpMessage)
 import MCP.Server.JsonRpc
 import Test.Hspec
+import TestHelpers (testStateCodec)
 
 progressServer :: McpServerHandlers
 progressServer = noHandlers
@@ -23,11 +24,11 @@ progressServer = noHandlers
           "work" -> do
             reportProgress ctx 0.2 (Just 1.0) (Just "starting")
             reportProgress ctx 0.9 Nothing Nothing
-            pure $ Right $ toToolResult ("done" :: Text)
+            pure $ Right $ Complete $ toToolResult ("done" :: Text)
           "chatty" -> do
             logToClient ctx LogInfo (String "fyi")
             logToClient ctx LogError (String "bad")
-            pure $ Right $ toToolResult ("ok" :: Text)
+            pure $ Right $ Complete $ toToolResult ("ok" :: Text)
           _ -> pure $ Left $ UnknownTool name
       )
   }
@@ -41,7 +42,7 @@ callTool metaFields tool = do
       params = object $
         ["name" .= tool, "arguments" .= object []]
           ++ (if null metaFields then [] else ["_meta" .= object metaFields])
-  resp <- handleMcpMessage (McpServerInfo "T" "1" "") defaultCacheHints
+  resp <- handleMcpMessage (McpServerInfo "T" "1" "") defaultCacheHints testStateCodec
     noNotificationSupport emit progressServer anonymousContext
     (JsonRpcMessageRequest (JsonRpcRequest "2.0" (RequestIdNumber 1) "tools/call" (Just params)))
   notifications <- readIORef sink

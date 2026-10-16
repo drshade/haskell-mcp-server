@@ -19,6 +19,7 @@ import MCP.Server
 import MCP.Server.Handlers (handleMcpMessage)
 import MCP.Server.JsonRpc
 import Test.Hspec
+import TestHelpers (testStateCodec)
 
 -- A slow tools/call carrying a progressToken (so emissions are live),
 -- driven from an async that the test cancels once the handler signals
@@ -35,7 +36,7 @@ runCancelled handlerBody = do
                 reportProgress ctx 0 (Just 1) Nothing
                 putMVar started ()
                 handlerBody ctx
-                pure $ Right $ toToolResult ("done" :: Text)
+                pure $ Right $ Complete $ toToolResult ("done" :: Text)
             )
         }
       params = object
@@ -44,7 +45,7 @@ runCancelled handlerBody = do
         , "_meta" .= object ["progressToken" .= ("t" :: Text)]
         ]
   task <- async $ do
-    resp <- handleMcpMessage (McpServerInfo "T" "1" "") defaultCacheHints
+    resp <- handleMcpMessage (McpServerInfo "T" "1" "") defaultCacheHints testStateCodec
       noNotificationSupport (\n -> modifyIORef' sink (++ [n]))
       handlers anonymousContext
       (JsonRpcMessageRequest (JsonRpcRequest "2.0" (RequestIdNumber 1) "tools/call" (Just params)))
