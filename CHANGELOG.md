@@ -1,5 +1,11 @@
 # Revision history for mcp-server
 
+## 0.3.0.1 - ???
+
+* Documentation: every module has a header and every export a doc
+  comment, and Haddock links that were ambiguous or out of scope are
+  fixed. No API changes.
+
 ## 0.3.0.0 - 2026-10-16
 
 * Raw JSON Schema keywords (ADR 0014): `SchemaRaw` is a new `SchemaType`
