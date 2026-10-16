@@ -9,8 +9,7 @@ workflow's guards.
 ## Procedure
 
 1. **Release-prep PR.** On a branch, stamp the date on the pending
-   CHANGELOG entry (`## 0.2.0.3 - 2026-10-01`) and update the "Current
-   state" paragraph in `specs/ROADMAP.md`. The version in
+   CHANGELOG entry (`## 0.2.0.3 - 2026-10-01`). The version in
    `mcp-server.cabal` should already be right; check it follows the PVP
    comment block there. Review this PR as the release review: once the
    tag is pushed there is no further checkpoint. Merge it.

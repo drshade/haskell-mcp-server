@@ -1,6 +1,6 @@
 # ADR 0008: Cancellation of in-flight requests
 
-- **Status**: Landed (0.2.0.1)
+- **Status**: Landed
 - **Date**: 2026-08-01
 - **Depends on**: ADR_0007
 

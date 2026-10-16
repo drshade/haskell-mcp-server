@@ -5,47 +5,12 @@ Where mcp-server is headed, as an ordering over the open
 batched (no release per feature), and the order reflects dependency and
 value, not commitment.
 
-**Current state**: 0.2.0.2 is released (2026-09-08), a bug-fix release
-on top of 0.2.0.1: stdio drains in-flight requests at EOF instead of
-cancelling them, and a handler that throws now yields a `-32603`
-response instead of no response at all. 0.2.0.1 (2026-08-01) superseded
-the deprecated, never-adopted 0.2.0.0 in place rather than burning a
-major version; on top of 0.2.0.0's typed core and dual-era protocol
-support (2024-11-05…2025-11-25 via `initialize`, stateless 2026-07-28),
-it added the WAI application export, the conformance corpus, Batch 1
-(derived output schemas, definition metadata) and Batch 2 (progress
-notifications, per-request SSE, client logging, request cancellation).
-Batch 3 onward is future work with no scheduled date. Releases go out
-via the tag-triggered Hackage release workflow (see `RELEASING.md`).
+What has shipped, and in which release, is in the
+[CHANGELOG](../CHANGELOG.md); this file only looks forward.
 
-## Batch 1 — complete the typed core *(landed)*
+## Next — interactivity
 
-Both landed in the pending 0.2.0.1.
-
-1. [ADR_0005 — Derived output schemas and structured content](ADR_0005_derived_output_schemas.md) — **Landed**.
-2. [ADR_0006 — Tool annotations, icons, content annotations](ADR_0006_definition_metadata.md) — **Landed**
-   (the definition-datatype extensions are breaking; they ship anyway in
-   0.2.0.1 because the only affected release, 0.2.0.0, is deprecated with
-   zero adopters).
-
-## Batch 2 — long-running tools *(landed)*
-
-Both landed in 0.2.0.1.
-
-3. [ADR_0007 — Progress notifications and per-request SSE](ADR_0007_progress_notifications.md) — **Landed**.
-4. [ADR_0008 — Cancellation of in-flight requests](ADR_0008_request_cancellation.md) — **Landed**
-   (sequenced immediately after ADR_0007, whose execution model it
-   builds on, and shipped in the same release).
-
-## Raw schemas *(landed, pending 0.3.0.0)*
-
-- [ADR_0014 — Raw JSON Schema keywords](ADR_0014_raw_schemas.md) — **Landed**.
-  A new `SchemaType` constructor, so the next release is 0.3.0.0 under
-  the PVP; other breaking work (such as ADR_0009) can batch into it.
-
-## Batch 3 — interactivity
-
-5. [ADR_0009 — MRTR: input_required results](ADR_0009_mrtr_input_required.md).
+1. [ADR_0009 — MRTR: input_required results](ADR_0009_mrtr_input_required.md).
    The largest missing capability class (tools that ask the user for
    input mid-call, the 2026-07-28 replacement for elicitation). Headline
    of its own release; touches result types, so any result-shape changes
@@ -63,7 +28,7 @@ Both landed in 0.2.0.1.
 ## On hold, with stated triggers
 
 - [ADR_0012 — Tasks extension](ADR_0012_tasks_extension.md): wait for the
-  extension spec to stop moving and for Batch 2 to land.
+  extension spec to stop moving.
 - [ADR_0013 — Extracting the conformance corpus](ADR_0013_conformance_corpus_extraction.md):
   wait for a second consumer (issue #9 is the likely origin).
 
