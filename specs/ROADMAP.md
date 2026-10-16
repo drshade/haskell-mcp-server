@@ -10,11 +10,12 @@ What has shipped, and in which release, is in the
 
 ## Next — interactivity
 
-1. [ADR_0009 — MRTR: input_required results](ADR_0009_mrtr_input_required.md).
-   The largest missing capability class (tools that ask the user for
-   input mid-call, the 2026-07-28 replacement for elicitation). Headline
-   of its own release; touches result types, so any result-shape changes
-   should co-design with it.
+1. [ADR_0009 — MRTR: handlers that ask for input](ADR_0009_mrtr_input_required.md).
+   The largest missing capability: tools, prompts and resources that ask
+   the user for input mid-call, the 2026-07-28 replacement for
+   elicitation. Derived handlers gain `Ask` and derived forms; the
+   low-level handler types change, so other result-shape changes should
+   be designed with it.
 
 ## Opportunistic — order by demand
 

@@ -46,7 +46,7 @@ Filename `ADR_XXXX_short_slug.md`, numbered sequentially. Body:
 | [0006](ADR_0006_definition_metadata.md) | Tool annotations, icons, content annotations | Landed |
 | [0007](ADR_0007_progress_notifications.md) | Progress notifications and per-request SSE | Landed |
 | [0008](ADR_0008_request_cancellation.md) | Cancellation of in-flight requests | Landed |
-| [0009](ADR_0009_mrtr_input_required.md) | MRTR: input_required results (elicitation) | Proposed |
+| [0009](ADR_0009_mrtr_input_required.md) | MRTR: handlers that ask for input | Accepted |
 | [0010](ADR_0010_oauth_resource_metadata.md) | OAuth protected-resource metadata | Proposed |
 | [0011](ADR_0011_protocol_completeness.md) | Pagination and the extensions capability | Proposed |
 | [0012](ADR_0012_tasks_extension.md) | Tasks extension | Hold |
