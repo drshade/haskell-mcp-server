@@ -863,8 +863,10 @@ data ClientContext = ClientContext
       --   otherwise); messages below the declared level are dropped.
   , clientInputResponses :: Map Text InputResponse
       -- ^ On a retry after 'InputRequired': the client's answers, keyed as
-      --   the handler keyed its requests. Empty otherwise. Only the latest
-      --   round's answers arrive; carry earlier ones in the state.
+      --   the handler keyed its requests. Only answers to the requests that
+      --   round issued are passed on; anything else the client sends is
+      --   ignored. Empty otherwise. Only the latest round's answers arrive;
+      --   carry earlier ones in the state.
   , clientRequestState :: Maybe Text
       -- ^ On a retry after 'InputRequired': the state the handler returned,
       --   verified and decrypted by the library. 'Nothing' otherwise.

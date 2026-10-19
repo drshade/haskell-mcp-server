@@ -16,6 +16,7 @@ module MCP.Server.Internal.InputRound
 import           Control.Monad            (unless, when)
 import qualified Crypto.Hash              as Hash
 import           Data.Aeson
+import qualified Data.Aeson.Key           as Key
 import qualified Data.Aeson.KeyMap        as KM
 import           Data.Aeson.Types         (parseEither)
 import qualified Data.ByteArray           as BA
@@ -40,6 +41,7 @@ data Payload = Payload
   , payloadParams    :: Text        -- ^ Digest of the request parameters
   , payloadPrincipal :: Text        -- ^ Digest of the caller's principal
   , payloadExpires   :: Integer     -- ^ POSIX seconds
+  , payloadKeys      :: [Text]      -- ^ The keys of the requests issued
   , payloadState     :: Maybe Text  -- ^ The handler's own state
   }
 
@@ -50,6 +52,7 @@ instance ToJSON Payload where
     , "d" .= payloadParams p
     , "p" .= payloadPrincipal p
     , "e" .= payloadExpires p
+    , "k" .= payloadKeys p
     , "s" .= payloadState p
     ]
 
@@ -57,38 +60,42 @@ instance FromJSON Payload where
   parseJSON = withObject "Payload" $ \o -> do
     version <- o .: "v"
     unless (version == (1 :: Int)) $ fail "unsupported state version"
-    Payload <$> o .: "m" <*> o .: "d" <*> o .: "p" <*> o .: "e" <*> o .:? "s"
+    Payload <$> o .: "m" <*> o .: "d" <*> o .: "p" <*> o .: "e" <*> o .: "k" <*> o .:? "s"
 
 -- | Prepare the context for a call that may be a retry. Legacy requests
 -- have no multi round-trip semantics, so their context is left alone.
--- A retry's state is verified before anything else; a failure is a
--- @-32602@ the handler never sees.
+--
+-- Answers are only taken from a retry that carries the state of the round
+-- that asked, and only for the keys that round issued: anything else in
+-- @inputResponses@ is ignored, as the spec asks, so a client cannot
+-- volunteer answers the handler never requested. A retry's state is
+-- verified before anything else; a failure is a @-32602@ the handler never
+-- sees.
 beginRound :: StateCodec -> Text -> Maybe Value -> ClientContext
            -> IO (Either JsonRpcError ClientContext)
 beginRound codec method params ctx
   | Nothing <- clientProtocolVersion ctx = pure (Right ctx)
-  | otherwise = case (field "inputResponses", field "requestState") of
-      (Just responses, _) | Left err <- parseResponses responses ->
-        pure $ Left $ invalidParams $ "Invalid inputResponses: " <> T.pack err
-      (_, Just (String sealed)) -> do
+  | otherwise = case field "requestState" of
+      Nothing -> pure (Right ctx)
+      Just (String sealed) -> do
         opened <- openPayload codec method params ctx sealed
-        pure $ case opened of
-          Left err    -> Left err
-          Right state -> Right ctx
-            { clientInputResponses = responsesOf
-            , clientRequestState = state
-            }
-      (_, Just _) ->
-        pure $ Left $ invalidParams "Invalid requestState: expected a string"
-      (_, Nothing) -> pure $ Right ctx { clientInputResponses = responsesOf }
+        pure $ do
+          (keys, state) <- opened
+          responses <- issuedResponses keys
+          Right ctx { clientInputResponses = responses, clientRequestState = state }
+      Just _ -> pure $ Left $ invalidParams "Invalid requestState: expected a string"
   where
     field key = case params of
       Just (Object o) -> KM.lookup key o
       _               -> Nothing
-    parseResponses = parseEither parseJSON :: Value -> Either String (Map Text InputResponse)
-    responsesOf = case field "inputResponses" of
-      Just v | Right rs <- parseResponses v -> rs
-      _                                     -> Map.empty
+    issuedResponses keys = case field "inputResponses" of
+      Nothing          -> Right Map.empty
+      Just (Object rs) -> Map.fromList <$> traverse parseIssued
+        [ (key, v) | key <- keys, Just v <- [KM.lookup (Key.fromText key) rs] ]
+      Just _           -> Left $ invalidParams "Invalid inputResponses: expected an object"
+    parseIssued (key, v) = case parseEither parseJSON v of
+      Right response -> Right (key, response)
+      Left err -> Left $ invalidParams $ "Invalid inputResponses: " <> key <> ": " <> T.pack err
 
 -- | The @input_required@ result for a handler's requests and state, or a
 -- @-32603@ when the handler asked for input this client cannot provide
@@ -112,6 +119,7 @@ inputRequiredResult codec method params ctx requests state
             , payloadParams = paramsDigest params
             , payloadPrincipal = principalDigest ctx
             , payloadExpires = floor (now + stateLifetime codec)
+            , payloadKeys = Map.keys requests
             , payloadState = state
             }
       sealed <- sealState codec (BSL.toStrict (encode payload))
@@ -128,7 +136,7 @@ inputRequiredResult codec method params ctx requests state
       }
 
 openPayload :: StateCodec -> Text -> Maybe Value -> ClientContext -> Text
-            -> IO (Either JsonRpcError (Maybe Text))
+            -> IO (Either JsonRpcError ([Text], Maybe Text))
 openPayload codec method params ctx sealed = do
   opened <- openState codec sealed
   now <- getPOSIXTime
@@ -147,9 +155,9 @@ openPayload codec method params ctx sealed = do
           Left (invalid, "issued to a different principal")
         when (fromInteger (payloadExpires payload) < now) $
           Left (expired, "expired")
-        pure (payloadState payload)
+        pure (payloadKeys payload, payloadState payload)
   case check of
-    Right state -> pure (Right state)
+    Right issued -> pure (Right issued)
     Left (err, reason) -> do
       hPutStrLn stderr $ "Rejected requestState on " <> T.unpack method <> ": " <> T.unpack reason
       pure (Left err)

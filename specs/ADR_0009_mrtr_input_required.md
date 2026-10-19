@@ -283,9 +283,13 @@ expiry, and a user may take a while to answer a form.
   `requestState` on the modern envelope.
 - Legacy clients never receive it. `Unavailable` covers the `Ask` path,
   and the `-32603` rule covers the low-level path.
-- A malformed `inputResponses` is `-32602`. Unknown keys in it are ignored,
-  as the spec asks. A missing answer just leaves that position
-  unanswered, so the handler asks again.
+- The sealed state records the keys of the requests it was issued with.
+  A retry's `inputResponses` are read only for those keys; unknown keys
+  are ignored, as the spec asks, and answers sent without a state are
+  ignored altogether, so a client cannot volunteer answers to questions
+  the handler never asked. A malformed answer to an issued request, or an
+  `inputResponses` that is not an object, is `-32602`. A missing answer
+  just leaves that position unanswered, so the handler asks again.
 - Progress and cancellation work per round; each round is its own request.
 
 ### Phasing

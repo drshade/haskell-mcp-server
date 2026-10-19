@@ -307,9 +307,43 @@ spec = describe "Multi round-trip requests" $ do
       v <- retry formCaps "prod" ["requestState" .= (42 :: Int)]
       fmap fst (errorOf v) `shouldBe` Just (-32602)
 
-    it "rejects malformed inputResponses" $ do
-      v <- retry formCaps "prod" ["inputResponses" .= object ["proceed" .= (1 :: Int)]]
+    it "rejects a malformed answer to an issued request" $ do
+      first <- run "tools/call" (callParams formCaps "prod" [])
+      v <- retry formCaps "prod"
+        ["inputResponses" .= object ["proceed" .= (1 :: Int)], "requestState" .= stateOf first]
       fmap fst (errorOf v) `shouldBe` Just (-32602)
+      fmap snd (errorOf v) `shouldSatisfy` maybe False (T.isInfixOf "proceed")
+
+    it "rejects inputResponses that are not an object" $ do
+      first <- run "tools/call" (callParams formCaps "prod" [])
+      v <- retry formCaps "prod" ["inputResponses" .= (1 :: Int), "requestState" .= stateOf first]
+      fmap fst (errorOf v) `shouldBe` Just (-32602)
+
+  describe "Answers the handler did not ask for" $ do
+    it "ignores answers sent without a request state" $ do
+      v <- retry formCaps "prod" ["inputResponses" .= accept]
+      at ["result", "resultType"] v `shouldBe` Just (String "input_required")
+
+    it "ignores keys the previous round did not issue" $ do
+      first <- run "resources/read" (withCaps formCaps ["uri" .= ("resource://x" :: Text)])
+      v <- run "resources/read" $ withCaps formCaps
+        [ "uri" .= ("resource://x" :: Text)
+        , "inputResponses" .= object ["sneaky" .= object ["action" .= ("accept" :: Text)]]
+        , "requestState" .= stateOf first
+        ]
+      -- The handler saw no answers, so it asked again.
+      at ["result", "resultType"] v `shouldBe` Just (String "input_required")
+
+    it "ignores unknown keys whatever their value" $ do
+      first <- run "tools/call" (callParams formCaps "prod" [])
+      v <- retry formCaps "prod"
+        [ "inputResponses" .= object
+            [ "proceed" .= object ["action" .= ("accept" :: Text), "content" .= object ["ok" .= True]]
+            , "extra" .= (42 :: Int)
+            ]
+        , "requestState" .= stateOf first
+        ]
+      at ["result", "resultType"] v `shouldBe` Just (String "complete")
 
   describe "Clients that cannot answer" $ do
     it "is a server error to ask a client without the capability" $ do
