@@ -583,8 +583,9 @@ deploy ctx _ _ = pure $ Right $
   case Map.lookup "confirm" (clientInputResponses ctx) of
     Nothing | clientSupportsInput ctx question ->
       InputRequired (Map.singleton "confirm" question) (Just "step-1")
-    Just (ElicitResponse ElicitAccept _) ->
-      Complete (toolResult [ContentText "Deployed"])
+    Just (ElicitResponse ElicitAccept (Just answer))
+      | Map.lookup "ok" answer == Just (Bool True) ->
+          Complete (toolResult [ContentText "Deployed"])
     _ -> Complete (toolError "Not confirmed")
   where
     question = ElicitForm "Deploy to production?"
