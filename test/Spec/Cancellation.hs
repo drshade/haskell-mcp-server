@@ -22,9 +22,11 @@ import Test.Hspec
 import TestHelpers (testStateCodec)
 
 -- A slow tools/call carrying a progressToken (so emissions are live),
--- driven from an async that the test cancels once the handler signals
--- it has started.
-runCancelled :: (ClientContext -> IO ()) -> IO [JsonRpcNotification]
+-- driven from an async that the test cancels once the handler body signals
+-- it is ready: the body gets the signal as an action, and calls it once it
+-- has reached the point the test is about (inside a bracket, say), so
+-- cancellation cannot arrive earlier.
+runCancelled :: (IO () -> ClientContext -> IO ()) -> IO [JsonRpcNotification]
 runCancelled handlerBody = do
   sink <- newIORef []
   started <- newEmptyMVar
@@ -34,8 +36,7 @@ runCancelled handlerBody = do
             ( \_ -> pure []
             , \ctx _ _ -> do
                 reportProgress ctx 0 (Just 1) Nothing
-                putMVar started ()
-                handlerBody ctx
+                handlerBody (putMVar started ()) ctx
                 pure $ Right $ Complete $ toToolResult ("done" :: Text)
             )
         }
@@ -63,7 +64,8 @@ spec = describe "Cancellation contract" $ do
 
   it "a cancelled handler stops emitting and never yields a response" $ do
     lateEmit <- newIORef False
-    ns <- runCancelled $ \ctx -> do
+    ns <- runCancelled $ \ready ctx -> do
+      ready
       threadDelay 5000000
       writeIORef lateEmit True
       reportProgress ctx 1 (Just 1) Nothing
@@ -74,8 +76,9 @@ spec = describe "Cancellation contract" $ do
   it "bracket releases handler resources on cancellation" $ do
     acquired <- newIORef False
     released <- newIORef False
-    _ <- runCancelled $ \_ ->
-      bracket_ (writeIORef acquired True) (writeIORef released True) $
+    _ <- runCancelled $ \ready _ ->
+      bracket_ (writeIORef acquired True) (writeIORef released True) $ do
+        ready
         threadDelay 5000000
     readIORef acquired `shouldReturn` True
     readIORef released `shouldReturn` True
