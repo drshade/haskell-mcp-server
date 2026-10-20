@@ -13,6 +13,15 @@
   caller, the request's parameters and an expiry, and verified before the
   handler runs. The default key is random per process; `stdioStateCodec`
   and `httpStateCodec` configure a shared key, with rotation.
+* The `Ask` monad (ADR 0009, second phase; new module `MCP.Server.Ask`,
+  re-exported by `MCP.Server`): handlers that ask several questions are
+  written as straight-line code with `elicit`, `elicitUrl` and `step`, and
+  run with `runAsk`. Each round replays a journal kept in the request
+  state: answers and `step` results are recorded once and returned on
+  later rounds, and a handler that asks something different at a position
+  fails rather than receiving the wrong answer. `elicit` returns
+  `Unavailable` without a round trip when the client cannot ask. Forms
+  are instances of the new `Form` class.
 * BREAKING: `ToolCallHandler`, `PromptGetHandler` and `ResourceReadHandler`
   return `Outcome`; hand-written handlers wrap results in `Complete`.
   Derived handlers are unaffected.
