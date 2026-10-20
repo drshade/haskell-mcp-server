@@ -58,12 +58,13 @@ fickle counter = do
   reply <- elicit ("Question " <> T.pack (show n))
   pure (T.pack (show (reply :: Answer Confirm)))
 
--- | A step whose result is JSON null, then a question.
+-- | A step whose result is JSON null, a question, and a step after it.
 nullStep :: Ask Text
 nullStep = do
   nothing <- step (pure (Nothing :: Maybe Text))
   reply <- elicit "Still there?"
-  pure (T.pack (show (nothing, reply :: Answer Confirm)))
+  after <- step (pure (2 :: Int))
+  pure (T.pack (show (nothing, reply :: Answer Confirm, after)))
 
 handlersFor :: Counters -> IORef Int -> McpServerHandlers
 handlersFor counters fickleCounter = noHandlers
@@ -245,7 +246,7 @@ spec = describe "The Ask monad" $ do
     r1 <- call env "null" formCaps []
     questionsOf r1 `shouldBe` [("1", String "Still there?")]
     r2 <- call env "null" formCaps $ answer "1" (accepted ["ok" .= True]) : retrying r1
-    textOf r2 `shouldBe` Just (String "(Nothing,Accepted (Confirm {ok = True}))")
+    textOf r2 `shouldBe` Just (String "(Nothing,Accepted (Confirm {ok = True}),2)")
 
   it "settles a pending question as Unavailable when the client can no longer ask" $ do
     env <- newCounters
@@ -254,4 +255,4 @@ spec = describe "The Ask monad" $ do
     textOf r2 `shouldBe` Just (String "no target: Unavailable")
     r3 <- call env "null" formCaps []
     r4 <- call env "null" noCaps (retrying r3)
-    textOf r4 `shouldBe` Just (String "(Nothing,Unavailable)")
+    textOf r4 `shouldBe` Just (String "(Nothing,Unavailable,2)")
