@@ -1,11 +1,11 @@
 # Revision history for mcp-server
 
-## 0.4.0.0 - 2026-10-20
+## 0.3.0.1 - 2026-10-20
 
 Handlers can ask the user for input part-way through a request: the
 multi round-trip requests of MCP 2026-07-28 (ADR 0009).
 
-### Upgrading from 0.3
+### Upgrading from 0.3.0.0
 
 * Derived handlers (`derive*Handler`) need no changes.
 * Hand-written `ToolCallHandler`, `PromptGetHandler` and
