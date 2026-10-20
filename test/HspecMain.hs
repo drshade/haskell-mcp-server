@@ -11,6 +11,7 @@ import qualified Spec.AskMonad
 import qualified Spec.Cancellation
 import qualified Spec.UnicodeHandling
 import qualified Spec.DefinitionMetadata
+import qualified Spec.DerivedAsk
 import qualified Spec.DerivedOutput
 import qualified Spec.GoldenWire
 import qualified Spec.HandlerExceptions
@@ -36,6 +37,7 @@ main = hspec $ do
     Spec.Cancellation.spec
     Spec.UnicodeHandling.spec
     Spec.DefinitionMetadata.spec
+    Spec.DerivedAsk.spec
     Spec.DerivedOutput.spec
     Spec.GoldenWire.spec
     Spec.HandlerExceptions.spec

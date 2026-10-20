@@ -8,15 +8,6 @@ value, not commitment.
 What has shipped, and in which release, is in the
 [CHANGELOG](../CHANGELOG.md); this file only looks forward.
 
-## Next — interactivity
-
-1. [ADR_0009 — MRTR: handlers that ask for input](ADR_0009_mrtr_input_required.md).
-   The largest missing capability: tools, prompts and resources that ask
-   the user for input mid-call, the 2026-07-28 replacement for
-   elicitation. Derived handlers gain `Ask` and derived forms; the
-   low-level handler types change, so other result-shape changes should
-   be designed with it.
-
 ## Opportunistic — order by demand
 
 - [ADR_0010 — OAuth protected-resource metadata](ADR_0010_oauth_resource_metadata.md):
