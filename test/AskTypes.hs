@@ -6,7 +6,6 @@
 module AskTypes where
 
 import           Control.Monad.IO.Class (liftIO)
-import           Data.Aeson             (Value (..))
 import           Data.Text              (Text)
 import qualified Data.Text              as T
 import           Language.Haskell.TH    (recover)
