@@ -38,9 +38,11 @@ module MCP.Server.Derive.Internal
   , resolveToolOutput
   , omitNothing
   , canonicalJsonText
+    -- * Forms
+  , formFieldSchema
   ) where
 
-import           Data.Aeson           (Value (..), encode)
+import           Data.Aeson           (Value (..), decodeStrict, encode, toJSON)
 import qualified Data.Aeson.Key       as Key
 import qualified Data.Aeson.KeyMap    as KM
 import           Data.Aeson.Types     (Pair)
@@ -57,7 +59,8 @@ import           Network.URI          (unEscapeString)
 import           Text.Read            (readMaybe)
 
 import           MCP.Server.Internal.Json (canonicalJsonText)
-import           MCP.Server.Types     (Content (..), Error (..),
+import           MCP.Server.Types     (Content (..), Error (..), Schema (..),
+                                       SchemaType (..),
                                        ToolOutput (..), ToolResult (..),
                                        toolError, toolResult)
 
@@ -245,3 +248,21 @@ resolveToolOutput serialize out = case out of
 omitNothing :: Text -> (a -> Value) -> Maybe a -> [Pair]
 omitNothing _ _ Nothing        = []
 omitNothing name f (Just x)    = [(Key.fromText name, f x)]
+
+-- ---------------------------------------------------------------------------
+-- Forms
+-- ---------------------------------------------------------------------------
+
+-- | One property of a derived form: its shape, with a title and a default
+-- (JSON, checked when the form was derived) added as raw keywords, since
+-- t'Schema' has no place for them.
+formFieldSchema :: Maybe Text -> Maybe Text -> Maybe String -> SchemaType -> Schema
+formFieldSchema title description defaultJson shape
+  | null extras = Schema description shape
+  | otherwise = Schema description (SchemaRaw (KM.union (KM.fromList extras) base))
+  where
+    base = case toJSON (Schema Nothing shape) of
+      Object o -> o
+      _        -> KM.empty
+    extras = [("title", String t) | Just t <- [title]]
+          ++ [("default", v) | Just j <- [defaultJson], Just v <- [decodeStrict (TE.encodeUtf8 (T.pack j))]]

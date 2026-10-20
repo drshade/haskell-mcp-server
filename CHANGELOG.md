@@ -22,6 +22,17 @@
   fails rather than receiving the wrong answer. `elicit` returns
   `Unavailable` without a round trip when the client cannot ask. Forms
   are instances of the new `Form` class.
+* Derived handlers can ask (ADR 0009, third phase): the
+  `derive*Handler` functions accept handlers returning `Ask` as well as
+  `IO`, through the new `HandlerMonad` class, so a handler starts asking
+  by changing its type. `deriveForm`, `deriveFormWithDescription` and
+  `deriveFormWithOptions` (labels and defaults, via `FormFieldOptions`)
+  derive `Form` instances from flat records; fields a form cannot hold,
+  unknown option fields and ill-typed defaults are compile-time errors.
+* `deriveToolHandlerWithOutput` and its variants no longer need
+  `toJSON`, `object` and `.=` from `Data.Aeson` in scope where they are
+  spliced: the generated serializer looked those names up in the user's
+  module.
 * BREAKING: `ToolCallHandler`, `PromptGetHandler` and `ResourceReadHandler`
   return `Outcome`; hand-written handlers wrap results in `Complete`.
   Derived handlers are unaffected.

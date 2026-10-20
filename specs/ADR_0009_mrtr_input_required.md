@@ -1,6 +1,6 @@
 # ADR 0009: MRTR — handlers that ask for input
 
-- **Status**: Accepted
+- **Status**: Landed
 - **Date**: 2026-10-16 (first drafted 2026-08-01)
 - **Depends on**: —
 
@@ -104,11 +104,13 @@ main = runMcpServerStdio info noHandlers
   lists of enumeration values: what elicitation allows. A nested record
   or other unsupported field is a compile-time error naming the field.
   `deriveFormWithDescription` takes field descriptions as the other
-  derive functions do.
+  derive functions do, and `deriveFormWithOptions` adds per-field labels
+  (`title`) and starting values (`default`), checked against the field
+  types at compile time.
 - `elicit :: Form a => Text -> Ask (Answer a)` picks the form from the
   result type, so a question is one line.
 - The `derive*Handler` splices accept handlers in `IO` or `Ask`, through
-  a small class with an instance for each, so existing handlers compile
+  a small class (`HandlerMonad`) with an instance for each, so existing handlers compile
   unchanged and switching one to `Ask` changes only its type.
 - `deriveToolHandler`, `derivePromptHandler` and `deriveResourceHandler`
   all support it, since the spec allows `input_required` on

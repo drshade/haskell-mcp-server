@@ -569,13 +569,126 @@ mutable state must synchronize with `MVar`, `STM` or similar.
 
 ## Asking the user for input
 
-A `tools/call`, `prompts/get` or `resources/read` handler can stop and ask
-the client for input — a form for the user to fill in, or a URL to visit —
-using the 2026-07-28 multi round-trip requests. The handler returns
-`InputRequired` with its requests and some state of its own; the client
-asks the user and retries the request, and the handler runs again with
-the answers in `clientInputResponses` and its state in
-`clientRequestState`:
+A tool, prompt or resource handler can stop part-way through and ask the
+user something: a form to fill in, or a URL to visit. This uses the
+2026-07-28 multi round-trip requests. Give the handler the type `Ask`
+instead of `IO`, derive forms from the records you want back, and write
+the questions in order, as if the handler could wait for the answers:
+
+```haskell
+data Environment = Staging | Production
+
+data DeployTarget = DeployTarget
+  { environment :: Environment     -- a choice: staging, production
+  , reason      :: Text
+  , notify      :: Maybe Bool      -- optional
+  }
+
+newtype Confirm = Confirm { proceed :: Bool }
+
+data OpsTool = Deploy { service :: Text } | Status { service :: Text }
+
+$(deriveFormWithDescription ''DeployTarget [("reason", "Why deploy now?")])
+$(deriveForm ''Confirm)
+
+handleTool :: ClientContext -> OpsTool -> Ask Content
+handleTool _ (Deploy svc) = do
+  target <- elicit ("Where should " <> svc <> " deploy to?")
+  case target of
+    Accepted t -> do
+      plan <- step (planDeploy svc (environment t))      -- runs once
+      ok   <- elicit ("Apply " <> describePlan plan <> "?")
+      case ok of
+        Accepted (Confirm True) -> ContentText <$> step (applyPlan plan)
+        _                       -> pure (ContentText "Deployment cancelled")
+    Unavailable -> pure (ContentText "This client cannot ask where to deploy")
+    _           -> pure (ContentText "No target chosen")
+handleTool _ (Status svc) = ContentText <$> liftIO (currentStatus svc)
+
+tools = Just $(deriveToolHandler ''OpsTool 'handleTool)
+```
+
+`elicit` picks the form from the type the code expects back, so
+`Accepted (Confirm True)` is all it takes to ask the `Confirm` form. The
+answer is `Accepted` with the submitted record, `Declined` or `Cancelled`,
+or `Unavailable`, without a round trip, when the client cannot ask: it
+speaks an older protocol revision or did not declare form elicitation.
+`elicitUrl` sends the user to a URL instead.
+
+The `derive*Handler` functions take `IO` and `Ask` handlers alike, so a
+handler switches by changing its type. A tool that never asks, like
+`Status`, finishes in one round; plain IO runs in `Ask` through `liftIO`.
+Structured output works the same way: return `Ask (ToolOutput a)`.
+
+### Forms
+
+`deriveForm` builds the form's schema and its parser from a record.
+Elicitation forms are flat, so the fields can be `Text`, `Int`, `Integer`,
+`Double`, `Float`, `Bool`, enumerations (offered as snake_cased choices),
+lists of enumerations (several choices) and `Maybe` of these for optional
+fields. Anything else, such as a nested record, is a compile-time error
+naming the field. `deriveFormWithDescription` adds help text per field, and
+`deriveFormWithOptions` also sets labels and starting values:
+
+```haskell
+$(deriveFormWithOptions ''DeployTarget
+    [ ("environment", defaultFormFieldOptions
+        { formFieldTitle = Just "Environment", formFieldDefault = Just "staging" })
+    , ("reason", defaultFormFieldOptions { formFieldDescription = Just "Why deploy now?" })
+    ])
+```
+
+A default that does not fit its field, or an option for a field the record
+does not have, is also a compile-time error. `deriveForm` is a declaration splice, and
+Template Haskell lets later splices see only the types declared above the
+last declaration splice, so declare the tool, prompt and resource types
+before the `deriveForm` lines (or in another module). For a form a record cannot
+describe, write the `Form` instance by hand: a schema and a parser.
+
+### How it works, and the rules that follow
+
+The handler does not pause between rounds. Each round ends the request:
+the client asks the user, then sends the request again with the answer,
+possibly to another server instance. So the handler runs again from the
+start, and the library replays a journal of what earlier rounds produced,
+kept in the state the client carries: `elicit` returns the recorded
+answer, or ends the round with its question; `step` returns its recorded
+result instead of running the action again.
+
+- **Ask the same questions and run the same steps in the same order on
+  every round.** A handler that strays from its journal fails with an
+  internal error naming the position, rather than receiving the answer to
+  a different question.
+- **`step` is at-least-once.** A client that retries from an earlier state
+  runs later steps again. Make effects that must happen once idempotent.
+- **`step` results travel to the client and back**, encrypted, on every
+  later round: return an id rather than the whole object. Plain `liftIO` is
+  not journaled and runs on every round; use it for reads.
+
+### Protecting the state
+
+The library protects the state the client carries between rounds: it is
+encrypted, and bound to the caller, the request's arguments and an expiry
+(60 minutes by default), and a retry presenting tampered, expired or
+misdirected state is rejected before the handler runs. By default the key
+is random per process, which suits stdio and a single HTTP instance. HTTP
+deployments with several instances must share a key:
+
+```haskell
+main = do
+  secret <- readSecret                                  -- 32 bytes, shared by every instance
+  key <- maybe (fail "state key must be 32 bytes") pure (stateKey "2026-10" secret)
+  runMcpServerHttpWithConfig defaultHttpConfig
+    { httpStateCodec = Just (aeadStateCodec key []) }   -- to rotate: aeadStateCodec new [old]
+    serverInfo handlers
+```
+
+### Low-level handlers
+
+Hand-written call handlers return an `Outcome`: `Complete` with the result,
+or `InputRequired` with requests keyed by ids of the handler's choosing and
+some state of its own. On the retry the handler sees the answers in
+`clientInputResponses` and its state in `clientRequestState`:
 
 ```haskell
 deploy :: ToolCallHandler
@@ -595,71 +708,8 @@ deploy ctx _ _ = pure $ Right $
 `clientSupportsInput` says whether the client can answer: it must speak
 2026-07-28 and have declared the elicitation mode (or sampling, or roots)
 in question. Asking a client that cannot answer is reported as an internal
-error, so check first and fall back.
-
-The library protects the state the client carries between rounds: it is
-encrypted, and bound to the caller, the request's arguments and an expiry
-(60 minutes by default), and a retry presenting tampered, expired or
-misdirected state is rejected before the handler runs. By default the key
-is random per process, which suits stdio and a single HTTP instance. HTTP
-deployments with several instances must share a key:
-
-```haskell
-main = do
-  secret <- readSecret                                  -- 32 bytes, shared by every instance
-  key <- maybe (fail "state key must be 32 bytes") pure (stateKey "2026-10" secret)
-  runMcpServerHttpWithConfig defaultHttpConfig
-    { httpStateCodec = Just (aeadStateCodec key []) }   -- to rotate: aeadStateCodec new [old]
-    serverInfo handlers
-```
-
-### Straight-line handlers with `Ask`
-
-Juggling keys and state by hand gets awkward past one question. In the
-`Ask` monad a handler asks its questions in order, as if it could wait for
-the answers:
-
-```haskell
-newtype Confirm = Confirm { ok :: Bool } deriving Generic
-instance FromJSON Confirm
-instance Form Confirm where
-  formSchema _ = schema (SchemaObject [("ok", schema SchemaBoolean)] ["ok"])
-
-deploy :: Text -> Ask ToolResult
-deploy service = do
-  plan <- step (planDeploy service)          -- runs once; replayed afterwards
-  answer <- elicit ("Apply " <> describePlan plan <> "?")
-  case answer of
-    Accepted (Confirm True) -> do
-      step (applyPlan plan)
-      pure (toolResult [ContentText "Deployed"])
-    Unavailable -> pure (toolError "This client cannot confirm a deployment")
-    _ -> pure (toolResult [ContentText "Cancelled"])
-
-handleCall :: ToolCallHandler
-handleCall ctx "deploy" args = runAsk (deploy (serviceOf args)) ctx
-handleCall _ name _ = pure (Left (UnknownTool name))
-```
-
-The handler does not pause between rounds: it runs again from the start on
-every retry, and the library replays a journal, kept in the protected
-state, of what earlier rounds produced. `elicit` returns the recorded
-answer, or ends the round with its question; `step` returns its recorded
-result instead of running the action again. `elicit` answers
-`Unavailable`, without a round trip, when the client cannot ask. Three
-rules follow:
-
-- Ask the same questions and run the same steps in the same order on every
-  round. A handler that strays from its journal fails with an internal
-  error naming the position.
-- `step` is at-least-once: a client that retries from an earlier state runs
-  later steps again. Make effects that must happen once idempotent.
-- `step` results travel to the client and back, encrypted, on every later
-  round: return an id rather than the whole object. Plain `liftIO` is not
-  journaled and runs on every round.
-
-Derived handlers will be able to return `Ask` directly, with forms derived
-from records; see [ADR 0009](specs/ADR_0009_mrtr_input_required.md).
+error, so check first and fall back. A low-level handler can also run an
+`Ask` computation with `runAsk`, which is what the derived handlers do.
 
 ## Change notifications
 
@@ -698,12 +748,12 @@ capabilities are advertised only where delivery is possible:
 | Progress and per-request logging | ✅ | ✅ |
 | Cancellation | ✅ | ✅ |
 | Change notifications | stdio only | `subscriptions/listen` (stdio and HTTP) |
-| Asking for input (multi round-trip requests) | — | `input_required` results, protected `requestState` |
+| Asking for input (multi round-trip requests) | — | `Ask` handlers and derived forms, protected `requestState` |
 | Result typing and cacheability hints | — | `resultType`, `httpCacheHints` |
 | HTTP request-metadata headers | — | `MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name` validated |
 
-Design decisions and planned work (derived handlers that ask for input,
-OAuth resource metadata, pagination, the tasks extension) live as ADRs under
+Design decisions and planned work (OAuth resource metadata, pagination,
+the tasks extension) live as ADRs under
 [`specs/`](specs/README.md), ordered by [`specs/ROADMAP.md`](specs/ROADMAP.md).
 
 ## Examples

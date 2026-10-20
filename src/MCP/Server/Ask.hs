@@ -41,6 +41,10 @@
 -- Plain 'liftIO' is not journaled: it runs on every round. Use it for reads
 -- that may change between rounds without changing which questions are
 -- asked.
+--
+-- Derived handlers ("MCP.Server.Derive") may return t'Ask' instead of
+-- 'IO', and 'MCP.Server.Derive.deriveForm' derives t'Form' instances from
+-- records.
 module MCP.Server.Ask
   ( -- * Handlers that ask
     Ask
@@ -53,6 +57,8 @@ module MCP.Server.Ask
   , elicitUrl
     -- * Journaled IO
   , step
+    -- * Derived handlers
+  , HandlerMonad(..)
   ) where
 
 import           Control.Monad            (ap, liftM)
@@ -143,7 +149,8 @@ askContext = Ask $ \ctx run -> pure (Done ctx run)
 
 -- | Run a handler for one round: 'Complete' when it finishes, or
 -- 'InputRequired' with its next question and its journal as the state.
--- Use it in a low-level call handler.
+-- Use it in a low-level call handler; derived handlers are run with it
+-- for you (see t'HandlerMonad').
 runAsk :: Ask a -> ClientContext -> IO (Either Error (Outcome a))
 runAsk (Ask m) ctx = case readJournal (clientRequestState ctx) of
   Left err -> pure (Left (InternalError err))
@@ -163,6 +170,20 @@ runAsk (Ask m) ctx = case readJournal (clientRequestState ctx) of
         (Map.singleton (positionKey pos) request)
         (Just (writeJournal (Journal written (Just fp))))
       Failed err -> Left err
+
+-- | The monads a derived handler can run in: 'IO' for handlers that never
+-- ask, and t'Ask' for handlers that do. The @derive*Handler@ splices run
+-- the handler through this class, so either return type works and a handler
+-- switches by changing its type alone.
+class Monad m => HandlerMonad m where
+  -- | Run a handler for one round of a request.
+  runHandler :: ClientContext -> m a -> IO (Either Error (Outcome a))
+
+instance HandlerMonad IO where
+  runHandler _ action = Right . Complete <$> action
+
+instance HandlerMonad Ask where
+  runHandler ctx handler = runAsk handler ctx
 
 -- | Ask the user to fill in the form for @a@, with a message.
 elicit :: Form a => Text -> Ask (Answer a)

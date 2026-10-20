@@ -11,6 +11,10 @@
 -- @inputSchema@ mirrors the same structure. Prompt arguments are
 -- string-valued per the MCP specification, so prompt records are limited to
 -- primitive and enumeration fields.
+--
+-- Handlers may return 'IO' or 'MCP.Server.Ask.Ask' (see t'HandlerMonad'):
+-- an t'MCP.Server.Ask.Ask' handler can ask the user questions part-way
+-- through, with forms derived by 'deriveForm'.
 module MCP.Server.Derive
   ( -- * Template Haskell Derivation
     derivePromptHandler
@@ -29,13 +33,23 @@ module MCP.Server.Derive
   , deriveToolHandlerWithOutputDescription
   , deriveToolHandlerWithOutputOptions
 
+    -- * Forms for elicitation
+  , deriveForm
+  , deriveFormWithDescription
+  , deriveFormWithOptions
+  , FormFieldOptions(..)
+  , defaultFormFieldOptions
+
     -- * Per-constructor customization
   , DefinitionOptions(..)
   , defaultDefinitionOptions
   ) where
 
 import           Control.Monad       (zipWithM)
-import           Data.Aeson          (Value (..))
+-- Names used inside quotes must be imported here, or the generated code
+-- looks them up in the user's module instead.
+import           Data.Aeson          (Value (..), encode, object, toJSON, (.=))
+import qualified Data.ByteString.Lazy.Char8 as BSL8
 import           Data.List           (intercalate)
 import           Data.Maybe          (fromMaybe)
 import           Data.Text           (Text)
@@ -44,6 +58,7 @@ import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax (Lift, lift)
 import qualified Data.Char           as Char
 
+import           MCP.Server.Ask      (Form (..), HandlerMonad (..))
 import           MCP.Server.Derive.Internal
 import           MCP.Server.Types
 
@@ -515,21 +530,18 @@ mkDispatchCase style handlerName con = do
     ToolArgs ->
       [| case $(return decoder) of
            Left err -> pure (Left err)
-           Right v  -> do
-             r <- $(varE handlerName) $(varE ctxName) v
-             pure (Right (Complete (toToolResult r))) |]
+           Right v  -> fmap (fmap toToolResult) <$>
+             runHandler $(varE ctxName) ($(varE handlerName) $(varE ctxName) v) |]
     ToolArgsOutput builder ->
       [| case $(return decoder) of
            Left err -> pure (Left err)
-           Right v  -> do
-             r <- $(varE handlerName) $(varE ctxName) v
-             pure (Right (Complete (resolveToolOutput $(return builder) r))) |]
+           Right v  -> fmap (fmap (resolveToolOutput $(return builder))) <$>
+             runHandler $(varE ctxName) ($(varE handlerName) $(varE ctxName) v) |]
     PromptArgs ->
       [| case $(return decoder) of
            Left err -> pure (Left err)
-           Right v  -> do
-             r <- $(varE handlerName) $(varE ctxName) v
-             pure (Right (Complete (toPromptResult r))) |]
+           Right v  -> fmap (fmap toPromptResult) <$>
+             runHandler $(varE ctxName) ($(varE handlerName) $(varE ctxName) v) |]
   clause [litP $ stringL sname] (normalB (return body)) []
 
 -------------------------------------------------------------------------------
@@ -666,7 +678,7 @@ mkResourceAlt handlerName con restQ = case con of
   NormalC name [] -> do
     let resourceURI = "resource://" <> snakeName name
     [| if show $(varE uriName) == $(litE $ stringL resourceURI)
-         then Right . Complete <$> $(varE handlerName) $(varE ctxName) $(varE uriName) $(conE name)
+         then runHandler $(varE ctxName) ($(varE handlerName) $(varE ctxName) $(varE uriName) $(conE name))
          else $restQ |]
   RecC name [] ->
     fail $ "Resource template constructors need at least one field: " ++ nameBase name
@@ -676,7 +688,7 @@ mkResourceAlt handlerName con restQ = case con of
     decoder <- mkSegmentsDecoder segsName name fields
     handled <- [| case $(return decoder) of
                     Left err -> pure (Left err)
-                    Right v  -> Right . Complete <$> $(varE handlerName) $(varE ctxName) $(varE uriName) v |]
+                    Right v  -> runHandler $(varE ctxName) ($(varE handlerName) $(varE ctxName) $(varE uriName) v) |]
     rest <- restQ
     matchExp <- [| matchTemplateSegments $(litE $ stringL prefix)
                      $(litE $ integerL $ fromIntegral $ length fields)
@@ -817,3 +829,135 @@ mkToolDef conOpts globalDescs outputShape con = do
       , toolDefinitionAnnotations = $(lift (optToolAnnotations opts))
       , toolDefinitionIcons = $(lift (optIcons opts))
       } |]
+
+-------------------------------------------------------------------------------
+-- Form derivation (elicitation)
+-------------------------------------------------------------------------------
+
+-- | How one field of a derived form is presented.
+data FormFieldOptions = FormFieldOptions
+  { formFieldTitle       :: Maybe Text
+    -- ^ The label clients show (falls back to the field name)
+  , formFieldDescription :: Maybe Text
+    -- ^ Help text shown with the field
+  , formFieldDefault     :: Maybe Value
+    -- ^ The value the field starts with; checked against the field's type
+    --   at compile time
+  } deriving (Show, Eq)
+
+-- | Nothing customized; record-update what you need.
+defaultFormFieldOptions :: FormFieldOptions
+defaultFormFieldOptions = FormFieldOptions
+  { formFieldTitle = Nothing
+  , formFieldDescription = Nothing
+  , formFieldDefault = Nothing
+  }
+
+-- | Derive a t'Form' instance from a record, for 'MCP.Server.Ask.elicit':
+--
+-- > data Environment = Staging | Production
+-- > data DeployTarget = DeployTarget { environment :: Environment, reason :: Text, notify :: Maybe Bool }
+-- > $(deriveForm ''DeployTarget)
+--
+-- Elicitation forms are flat, so the fields may be 'Text', 'Int',
+-- 'Integer', 'Double', 'Float', t'Bool', enumerations (data types whose
+-- constructors are all nullary, offered as snake_cased choices), lists of
+-- enumerations (several choices), and 'Maybe' of any of these for optional
+-- fields. Anything else, such as a nested record, is a compile-time error
+-- naming the field.
+deriveForm :: Name -> Q [Dec]
+deriveForm typeName = deriveFormWithOptions typeName []
+
+-- | 'deriveForm' with field descriptions, keyed by field name.
+--
+-- > $(deriveFormWithDescription ''DeployTarget [("reason", "Why deploy now?")])
+deriveFormWithDescription :: Name -> [(String, String)] -> Q [Dec]
+deriveFormWithDescription typeName descriptions = deriveFormWithOptions typeName
+  [ (field, defaultFormFieldOptions { formFieldDescription = Just (T.pack d) })
+  | (field, d) <- descriptions ]
+
+-- | 'deriveForm' with per-field t'FormFieldOptions', keyed by field name.
+--
+-- > $(deriveFormWithOptions ''DeployTarget
+-- >     [ ("environment", defaultFormFieldOptions
+-- >         { formFieldTitle = Just "Environment", formFieldDefault = Just "staging" }) ])
+deriveFormWithOptions :: Name -> [(String, FormFieldOptions)] -> Q [Dec]
+deriveFormWithOptions typeName opts = do
+  cons <- reifyCons typeName
+  (con, fields) <- case cons of
+    Just [RecC con fields@(_ : _)] -> pure (con, fields)
+    _ -> fail $ "deriveForm: " ++ nameBase typeName
+           ++ " must be a record with a single constructor and at least one field"
+  let known = [nameBase fn | (fn, _, _) <- fields]
+  case [field | (field, _) <- opts, field `notElem` known] of
+    [] -> pure ()
+    unknown -> fail $ "deriveForm: " ++ nameBase typeName
+                 ++ " has no field named " ++ intercalate ", " unknown
+  props <- traverse (formProperty typeName opts) fields
+  let reqd = listE [litE $ stringL fn | fn <- requiredFieldNames fields]
+  parser <- mkObjectParser typeName con fields
+  [d| instance Form $(conT typeName) where
+        formSchema _ = Schema Nothing (SchemaObject $(return (ListE props)) $reqd)
+        formParse content = $(return parser) (toJSON content) |]
+
+-- One property of a form's schema, after checking the field can be in one.
+formProperty :: Name -> [(String, FormFieldOptions)] -> (Name, Bang, Type) -> Q Exp
+formProperty typeName opts (fieldName, _, fieldType) = do
+  let field = nameBase fieldName
+      (_, innerType) = unwrapMaybe fieldType
+      fieldOpts = fromMaybe defaultFormFieldOptions (lookup field opts)
+      unsupported why = fail $ "deriveForm: field '" ++ field ++ "' of " ++ nameBase typeName
+        ++ " " ++ why ++ "; form fields are Text, numbers, Bool, enumerations,"
+        ++ " lists of enumerations, or Maybe of these"
+  kind <- formFieldKind innerType >>= either unsupported pure
+  traverse_ (checkFormDefault typeName field kind) (formFieldDefault fieldOpts)
+  shape <- mkSchemaShape [] innerType
+  let defaultJson = BSL8.unpack . encode <$> formFieldDefault fieldOpts
+  [| ( $(litE (stringL field))
+     , formFieldSchema $(lift (formFieldTitle fieldOpts))
+                       $(lift (formFieldDescription fieldOpts))
+                       $(lift defaultJson)
+                       $(return shape)
+     ) |]
+  where
+    traverse_ f = maybe (pure ()) f
+
+-- What a form field holds, for checking defaults.
+data FormFieldKind = FormText | FormNumber | FormBool | FormChoice [String] | FormChoices [String]
+
+-- Classify a field type, or say why a form cannot hold it.
+formFieldKind :: Type -> Q (Either String FormFieldKind)
+formFieldKind ty = case ty of
+  ConT n | nameBase n == "Text"                                    -> ok FormText
+         | nameBase n `elem` ["Int", "Integer", "Double", "Float"] -> ok FormNumber
+         | nameBase n == "Bool"                                    -> ok FormBool
+  AppT ListT inner -> do
+    kind <- formFieldKind inner
+    pure $ case kind of
+      Right (FormChoice choices) -> Right (FormChoices choices)
+      _ -> Left "is a list of something other than an enumeration"
+  ConT n -> do
+    cons <- reifyCons n
+    case cons of
+      Just cs | not (null cs), all isNullary cs -> ok (FormChoice [snakeName (conName c) | c <- cs])
+      Just [RecC _ _] -> pure (Left "is a record (forms cannot nest)")
+      Just [NormalC _ [(_bang, inner)]] -> formFieldKind inner
+      _ -> pure (Left ("has type " ++ nameBase n))
+  AppT (ConT n) _ | nameBase n == "Maybe" -> pure (Left "is a nested Maybe")
+  _ -> pure (Left ("has type " ++ pprint ty))
+  where
+    ok = pure . Right
+
+-- A default must be a value the field can hold.
+checkFormDefault :: Name -> String -> FormFieldKind -> Value -> Q ()
+checkFormDefault typeName field kind value
+  | fits kind value = pure ()
+  | otherwise = fail $ "deriveForm: the default for field '" ++ field ++ "' of "
+      ++ nameBase typeName ++ " does not fit its type: " ++ BSL8.unpack (encode value)
+  where
+    fits FormText (String _)              = True
+    fits FormNumber (Number _)            = True
+    fits FormBool (Bool _)                = True
+    fits (FormChoice cs) (String c)       = T.unpack c `elem` cs
+    fits (FormChoices cs) (Array xs)      = all (fits (FormChoice cs)) xs
+    fits _ _                              = False
