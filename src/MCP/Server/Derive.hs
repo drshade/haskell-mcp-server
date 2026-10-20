@@ -39,6 +39,7 @@ module MCP.Server.Derive
   , deriveFormWithOptions
   , FormFieldOptions(..)
   , defaultFormFieldOptions
+  , Value(..)
 
     -- * Per-constructor customization
   , DefinitionOptions(..)

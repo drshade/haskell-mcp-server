@@ -29,6 +29,7 @@ RUN cabal build all
 RUN cabal install exe:http-simple-example --installdir=/usr/local/bin
 RUN cabal install exe:complete-example --installdir=/usr/local/bin
 RUN cabal install exe:simple-example --installdir=/usr/local/bin
+RUN cabal install exe:ask-example --installdir=/usr/local/bin
 
 # Runtime stage
 FROM debian:bullseye-slim
@@ -43,6 +44,7 @@ RUN apt-get update && \
 COPY --from=builder /usr/local/bin/http-simple-example /usr/local/bin/http-simple-example
 COPY --from=builder /usr/local/bin/complete-example /usr/local/bin/complete-example
 COPY --from=builder /usr/local/bin/simple-example /usr/local/bin/simple-example
+COPY --from=builder /usr/local/bin/ask-example /usr/local/bin/ask-example
 
 WORKDIR /app
 
