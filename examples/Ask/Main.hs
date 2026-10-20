@@ -4,7 +4,12 @@
 -- | Tools that ask the user for input part-way through (multi round-trip
 -- requests, MCP 2026-07-28). Run it, then watch stderr while a client
 -- books a table: the handler replays from the top on every round, but each
--- 'step' runs exactly once.
+-- 'step' runs once in a normal booking, its result replayed afterwards.
+--
+-- 'step' is at-least-once, though: a client that retries a round with an
+-- earlier state (say, after losing a reply) runs the steps after that point
+-- again. A real 'confirmBooking' must therefore be idempotent, for example
+-- by keying the booking on something the retry repeats.
 module Main where
 
 import           Control.Monad.IO.Class (liftIO)
@@ -67,6 +72,8 @@ findTable place details = do
               <> T.intercalate ", " (map dietLabel (dietary details)) <> ")")
         <> (if highChair details == Just True then " with a high chair" else "")
 
+-- Not idempotent: a retried final round would book again under a new
+-- reference. Fine for a demo; see the note at the top of the module.
 confirmBooking :: Text -> IO Text
 confirmBooking offer = do
     now <- getPOSIXTime
