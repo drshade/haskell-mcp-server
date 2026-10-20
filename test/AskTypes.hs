@@ -37,11 +37,19 @@ newtype Confirm = Confirm { proceed :: Bool }
 data Styled = Styled { size :: Double, label :: Text, mode :: Environment }
   deriving (Show, Eq)
 
+data Counted = Counted { count :: Int, greeting :: Text }
+  deriving (Show, Eq)
+
 $(deriveFormWithDescription ''DeployTarget [("reason", "Why deploy now?")])
 $(deriveForm ''Confirm)
 $(deriveFormWithOptions ''Styled
     [ ("size", defaultFormFieldOptions { formFieldTitle = Just "Size", formFieldDefault = Just (Number 1.5) })
     , ("mode", defaultFormFieldOptions { formFieldDefault = Just "production", formFieldDescription = Just "Where" })
+    ])
+
+$(deriveFormWithOptions ''Counted
+    [ ("count", defaultFormFieldOptions { formFieldDefault = Just (Number 3) })
+    , ("greeting", defaultFormFieldOptions { formFieldDefault = Just "café 東京" })
     ])
 
 -- Types a form cannot hold, for the compile-time rejection tests.
@@ -51,7 +59,8 @@ data TextList = TextList { names :: [Text] } deriving (Show, Eq)
 data Unit = Unit deriving (Show, Eq)
 
 -- | Which derivations were rejected at compile time.
-rejectedNested, rejectedTextList, rejectedUnit, rejectedUnknownField, rejectedBadDefault, rejectedBadChoice :: Bool
+rejectedNested, rejectedTextList, rejectedUnit, rejectedUnknownField, rejectedBadDefault, rejectedBadChoice,
+  rejectedFractionalInt, rejectedOutOfRangeInt :: Bool
 rejectedNested = $(recover [| True |] (deriveForm ''Nested >> [| False |]))
 rejectedTextList = $(recover [| True |] (deriveForm ''TextList >> [| False |]))
 rejectedUnit = $(recover [| True |] (deriveForm ''Unit >> [| False |]))
@@ -59,6 +68,10 @@ rejectedUnknownField = $(recover [| True |]
   (deriveFormWithDescription ''Confirm [("procede", "typo")] >> [| False |]))
 rejectedBadDefault = $(recover [| True |]
   (deriveFormWithOptions ''Confirm [("proceed", defaultFormFieldOptions { formFieldDefault = Just "yes" })] >> [| False |]))
+rejectedFractionalInt = $(recover [| True |]
+  (deriveFormWithOptions ''Counted [("count", defaultFormFieldOptions { formFieldDefault = Just (Number 1.5) })] >> [| False |]))
+rejectedOutOfRangeInt = $(recover [| True |]
+  (deriveFormWithOptions ''Counted [("count", defaultFormFieldOptions { formFieldDefault = Just (Number 1e30) })] >> [| False |]))
 rejectedBadChoice = $(recover [| True |]
   (deriveFormWithOptions ''Styled [("mode", defaultFormFieldOptions { formFieldDefault = Just "prod" })] >> [| False |]))
 

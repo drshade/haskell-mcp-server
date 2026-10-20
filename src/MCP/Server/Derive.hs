@@ -49,11 +49,12 @@ import           Control.Monad       (zipWithM)
 -- Names used inside quotes must be imported here, or the generated code
 -- looks them up in the user's module instead.
 import           Data.Aeson          (Value (..), encode, object, toJSON, (.=))
-import qualified Data.ByteString.Lazy.Char8 as BSL8
+import qualified Data.ByteString.Lazy as BSL
 import           Data.List           (intercalate)
 import           Data.Maybe          (fromMaybe)
 import           Data.Text           (Text)
 import qualified Data.Text           as T
+import qualified Data.Text.Encoding  as TE
 import           Language.Haskell.TH
 import           Language.Haskell.TH.Syntax (Lift, lift)
 import qualified Data.Char           as Char
@@ -912,7 +913,7 @@ formProperty typeName opts (fieldName, _, fieldType) = do
   kind <- formFieldKind innerType >>= either unsupported pure
   traverse_ (checkFormDefault typeName field kind) (formFieldDefault fieldOpts)
   shape <- mkSchemaShape [] innerType
-  let defaultJson = BSL8.unpack . encode <$> formFieldDefault fieldOpts
+  let defaultJson = jsonText <$> formFieldDefault fieldOpts
   [| ( $(litE (stringL field))
      , formFieldSchema $(lift (formFieldTitle fieldOpts))
                        $(lift (formFieldDescription fieldOpts))
@@ -923,13 +924,21 @@ formProperty typeName opts (fieldName, _, fieldType) = do
     traverse_ f = maybe (pure ()) f
 
 -- What a form field holds, for checking defaults.
-data FormFieldKind = FormText | FormNumber | FormBool | FormChoice [String] | FormChoices [String]
+data FormFieldKind
+  = FormText
+  | FormNumber (Value -> Either Text ())  -- the field's own parser, discarding the value
+  | FormBool
+  | FormChoice [String]
+  | FormChoices [String]
 
 -- Classify a field type, or say why a form cannot hold it.
 formFieldKind :: Type -> Q (Either String FormFieldKind)
 formFieldKind ty = case ty of
   ConT n | nameBase n == "Text"                                    -> ok FormText
-         | nameBase n `elem` ["Int", "Integer", "Double", "Float"] -> ok FormNumber
+         | nameBase n == "Int"                                     -> number valueInt
+         | nameBase n == "Integer"                                 -> number valueInteger
+         | nameBase n == "Double"                                  -> number valueDouble
+         | nameBase n == "Float"                                   -> number valueFloat
          | nameBase n == "Bool"                                    -> ok FormBool
   AppT ListT inner -> do
     kind <- formFieldKind inner
@@ -947,17 +956,24 @@ formFieldKind ty = case ty of
   _ -> pure (Left ("has type " ++ pprint ty))
   where
     ok = pure . Right
+    number parser = ok (FormNumber (fmap (const ()) . parser))
 
 -- A default must be a value the field can hold.
 checkFormDefault :: Name -> String -> FormFieldKind -> Value -> Q ()
 checkFormDefault typeName field kind value
   | fits kind value = pure ()
   | otherwise = fail $ "deriveForm: the default for field '" ++ field ++ "' of "
-      ++ nameBase typeName ++ " does not fit its type: " ++ BSL8.unpack (encode value)
+      ++ nameBase typeName ++ " does not fit its type: " ++ T.unpack (jsonText value)
   where
     fits FormText (String _)              = True
-    fits FormNumber (Number _)            = True
+    -- Numbers go through the field's parser, so an Int default must be a
+    -- whole number in range, as the parsed answer would have to be.
+    fits (FormNumber parse) v@(Number _)  = either (const False) (const True) (parse v)
     fits FormBool (Bool _)                = True
     fits (FormChoice cs) (String c)       = T.unpack c `elem` cs
     fits (FormChoices cs) (Array xs)      = all (fits (FormChoice cs)) xs
     fits _ _                              = False
+
+-- JSON as text, decoded as UTF-8 (the encoding is always valid UTF-8).
+jsonText :: Value -> Text
+jsonText = TE.decodeUtf8 . BSL.toStrict . encode

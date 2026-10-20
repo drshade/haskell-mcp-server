@@ -256,7 +256,7 @@ omitNothing name f (Just x)    = [(Key.fromText name, f x)]
 -- | One property of a derived form: its shape, with a title and a default
 -- (JSON, checked when the form was derived) added as raw keywords, since
 -- t'Schema' has no place for them.
-formFieldSchema :: Maybe Text -> Maybe Text -> Maybe String -> SchemaType -> Schema
+formFieldSchema :: Maybe Text -> Maybe Text -> Maybe Text -> SchemaType -> Schema
 formFieldSchema title description defaultJson shape
   | null extras = Schema description shape
   | otherwise = Schema description (SchemaRaw (KM.union (KM.fromList extras) base))
@@ -265,4 +265,4 @@ formFieldSchema title description defaultJson shape
       Object o -> o
       _        -> KM.empty
     extras = [("title", String t) | Just t <- [title]]
-          ++ [("default", v) | Just j <- [defaultJson], Just v <- [decodeStrict (TE.encodeUtf8 (T.pack j))]]
+          ++ [("default", v) | Just j <- [defaultJson], Just v <- [decodeStrict (TE.encodeUtf8 j)]]

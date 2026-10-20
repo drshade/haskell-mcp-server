@@ -136,6 +136,18 @@ spec = describe "Derived handlers that ask" $ do
       rejectedUnknownField `shouldBe` True
       rejectedBadDefault `shouldBe` True
       rejectedBadChoice `shouldBe` True
+      rejectedFractionalInt `shouldBe` True
+      rejectedOutOfRangeInt `shouldBe` True
+
+    it "keeps whole-number and non-ASCII defaults intact" $
+      toJSON (formSchema (Proxy :: Proxy Counted)) `shouldBe` object
+        [ "type" .= ("object" :: Text)
+        , "properties" .= object
+            [ "count" .= object ["type" .= ("integer" :: Text), "default" .= (3 :: Int)]
+            , "greeting" .= object ["type" .= ("string" :: Text), "default" .= ("café 東京" :: Text)]
+            ]
+        , "required" .= (["count", "greeting"] :: [Text])
+        ]
 
   describe "derive*Handler with Ask" $ do
     it "runs a derived tool across rounds" $ do
