@@ -175,7 +175,7 @@ url = "http://localhost:3000/mcp"
 
 Claude Desktop launches stdio servers from `claude_desktop_config.json`. A
 Docker image is a convenient way to ship a Haskell binary to it — the
-repository's [`Dockerfile`](Dockerfile) builds all three examples:
+repository's [`Dockerfile`](Dockerfile) builds all the examples:
 
 ```bash
 docker build -t haskell-mcp-server .
@@ -762,11 +762,15 @@ the tasks extension) live as ADRs under
 - [`examples/Complete/`](examples/Complete/): prompts, resources, a resource
   template, tools with enum, nested and list arguments, `isError`,
   annotations, progress and completions.
+- [`examples/Ask/`](examples/Ask/): tools that ask the user for input
+  part-way through: a table booking with a derived form, a confirmation
+  and a fallback for clients that cannot ask.
 - [`examples/HttpSimple/`](examples/HttpSimple/): the key-value store over
   Streamable HTTP.
 
 ```bash
 cabal run simple-example        # stdio; type JSON-RPC on stdin
+cabal run ask-example           # stdio; asks for input (2026-07-28 clients)
 cabal run http-simple-example   # http://localhost:3000/mcp
 ```
 

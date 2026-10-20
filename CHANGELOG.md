@@ -29,6 +29,9 @@
   `deriveFormWithOptions` (labels and defaults, via `FormFieldOptions`)
   derive `Form` instances from flat records; fields a form cannot hold,
   unknown option fields and ill-typed defaults are compile-time errors.
+  `MCP.Server.Derive` re-exports aeson's `Value` for writing defaults.
+* New example `ask-example` (`examples/Ask`): a table-booking server whose
+  tools ask the user for details and confirmation.
 * `deriveToolHandlerWithOutput` and its variants no longer need
   `toJSON`, `object` and `.=` from `Data.Aeson` in scope where they are
   spliced: the generated serializer looked those names up in the user's
