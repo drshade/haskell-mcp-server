@@ -63,8 +63,8 @@ nullStep :: Ask Text
 nullStep = do
   nothing <- step (pure (Nothing :: Maybe Text))
   reply <- elicit "Still there?"
-  after <- step (pure (2 :: Int))
-  pure (T.pack (show (nothing, reply :: Answer Confirm, after)))
+  later <- step (pure (2 :: Int))
+  pure (T.pack (show (nothing, reply :: Answer Confirm, later)))
 
 handlersFor :: Counters -> IORef Int -> McpServerHandlers
 handlersFor counters fickleCounter = noHandlers
