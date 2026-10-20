@@ -7,9 +7,12 @@ module TestHelpers
   , valueArgs
   , promptArgsMap
     -- * Result expectations
+  , completed
   , shouldBeTextResult
   , shouldBeTextResultContaining
   , shouldBePromptText
+    -- * Request state
+  , testStateCodec
     -- * Schema access
   , schemaTypeName
   , schemaProps
@@ -18,6 +21,7 @@ module TestHelpers
   ) where
 
 import           Data.Aeson (Value (..))
+import qualified Data.ByteString as BS
 import qualified Data.Aeson.KeyMap as KM
 import           Data.Map   (Map)
 import qualified Data.Map   as Map
@@ -39,17 +43,24 @@ valueArgs = Map.fromList
 promptArgsMap :: [(Text, Text)] -> Map Text Text
 promptArgsMap = Map.fromList
 
+-- | A handler result that should be complete, with an unexpected request
+-- for input turned into an error so that a @case@ on it stays exhaustive.
+completed :: Either Error (Outcome a) -> Either Error a
+completed (Right (Complete a))        = Right a
+completed (Right (InputRequired _ _)) = Left (InternalError "unexpected request for input")
+completed (Left err)                  = Left err
+
 -- | Expect a successful, non-error tool result with exactly one text block.
-shouldBeTextResult :: Either Error ToolResult -> Text -> Expectation
-shouldBeTextResult (Right tr) expected
+shouldBeTextResult :: Either Error (Outcome ToolResult) -> Text -> Expectation
+shouldBeTextResult (Right (Complete tr)) expected
   | not (toolResultIsError tr)
   , [ContentText content] <- toolResultContent tr = content `shouldBe` expected
 shouldBeTextResult other expected =
   expectationFailure $ "Expected text result '" ++ T.unpack expected ++ "' but got: " ++ show other
 
 -- | Like 'shouldBeTextResult' but with substring matching.
-shouldBeTextResultContaining :: Either Error ToolResult -> Text -> Expectation
-shouldBeTextResultContaining (Right tr) expected
+shouldBeTextResultContaining :: Either Error (Outcome ToolResult) -> Text -> Expectation
+shouldBeTextResultContaining (Right (Complete tr)) expected
   | not (toolResultIsError tr)
   , [ContentText content] <- toolResultContent tr =
       content `shouldSatisfy` T.isInfixOf expected
@@ -57,11 +68,18 @@ shouldBeTextResultContaining other expected =
   expectationFailure $ "Expected text result containing '" ++ T.unpack expected ++ "' but got: " ++ show other
 
 -- | Expect a prompt result of a single user message with the given text.
-shouldBePromptText :: Either Error PromptResult -> Text -> Expectation
-shouldBePromptText (Right (PromptResult _ [PromptMessage RoleUser (ContentText content)])) expected =
+shouldBePromptText :: Either Error (Outcome PromptResult) -> Text -> Expectation
+shouldBePromptText (Right (Complete (PromptResult _ [PromptMessage RoleUser (ContentText content)]))) expected =
   content `shouldBe` expected
 shouldBePromptText other expected =
   expectationFailure $ "Expected prompt text '" ++ T.unpack expected ++ "' but got: " ++ show other
+
+-- | A request-state codec with a fixed key, so tests need no IO to build
+-- one and can open what the server sealed.
+testStateCodec :: StateCodec
+testStateCodec = case stateKey "test" (BS.replicate 32 7) of
+  Just key -> aeadStateCodec key []
+  Nothing  -> error "testStateCodec: invalid key"
 
 -- | The JSON Schema type keyword for a schema.
 schemaTypeName :: Schema -> Text

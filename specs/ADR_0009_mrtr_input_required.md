@@ -240,8 +240,9 @@ results may hold internal data the client should not read.
 On a retry the library verifies, decrypts and checks the principal,
 method, parameter digest and expiry before the handler runs. Any failure
 is answered with `-32602`; the handler never sees rejected state. The
-message is generic, except that state under an unknown key id says it was
-issued by another instance or a retired key.
+message is generic, except that expired state says so (the client should
+start over), and state under an unknown key id says it was issued by
+another instance or a retired key.
 
 There is no compression: compressing attacker-chosen answers together
 with secret `step` results before encryption would leak information
@@ -253,13 +254,19 @@ Configuration is a `StateCodec` in the transport configurations:
 
 ```haskell
 data StateCodec = StateCodec
-  { encodeState :: StatePayload -> IO Text
-  , decodeState :: Text -> IO (Either Text StatePayload)
+  { sealState     :: ByteString -> IO Text
+  , openState     :: Text -> IO (Either StateError ByteString)
+  , stateLifetime :: NominalDiffTime
   }
 
-aeadStateCodec      :: [(KeyId, Key)] -> KeyId -> StateCodec   -- explicit keys, rotation
-ephemeralStateCodec :: IO StateCodec                           -- random key per process
+aeadStateCodec      :: StateKey -> [StateKey] -> StateCodec   -- seal with the first, open with any
+ephemeralStateCodec :: IO StateCodec                          -- random key per process
 ```
+
+The library builds and checks the payload; a codec only seals and opens
+bytes, so the payload format stays private to the library and a
+replacement codec (a key service, a server-side store) cannot get the
+binding checks wrong.
 
 The default is `ephemeralStateCodec`. That is correct for stdio and for a
 single HTTP instance; multi-instance HTTP deployments must share a key
@@ -276,9 +283,13 @@ expiry, and a user may take a while to answer a form.
   `requestState` on the modern envelope.
 - Legacy clients never receive it. `Unavailable` covers the `Ask` path,
   and the `-32603` rule covers the low-level path.
-- A malformed `inputResponses` is `-32602`. Unknown keys in it are ignored,
-  as the spec asks. A missing answer just leaves that position
-  unanswered, so the handler asks again.
+- The sealed state records the keys of the requests it was issued with.
+  A retry's `inputResponses` are read only for those keys; unknown keys
+  are ignored, as the spec asks, and answers sent without a state are
+  ignored altogether, so a client cannot volunteer answers to questions
+  the handler never asked. A malformed answer to an issued request, or an
+  `inputResponses` that is not an object, is `-32602`. A missing answer
+  just leaves that position unanswered, so the handler asks again.
 - Progress and cancellation work per round; each round is its own request.
 
 ### Phasing

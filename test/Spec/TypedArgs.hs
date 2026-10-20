@@ -21,7 +21,7 @@ typedHandlers = $(deriveToolHandler ''TypedTool 'handleTypedTool)
 convHandlers :: (PromptListHandler, PromptGetHandler)
 convHandlers = $(derivePromptHandler ''ConvPrompt 'handleConvPrompt)
 
-callTyped :: Text -> [(Text, Value)] -> IO (Either Error ToolResult)
+callTyped :: Text -> [(Text, Value)] -> IO (Either Error (Outcome ToolResult))
 callTyped name args = snd typedHandlers anonCtx name (valueArgs args)
 
 toolNamed :: Text -> [ToolDefinition] -> ToolDefinition
@@ -29,7 +29,7 @@ toolNamed n defs = case [d | d <- defs, toolDefinitionName d == n] of
   (d:_) -> d
   []    -> error $ "tool not found: " ++ T.unpack n
 
-expectInvalidParams :: Either Error ToolResult -> Text -> Expectation
+expectInvalidParams :: Either Error (Outcome ToolResult) -> Text -> Expectation
 expectInvalidParams (Left (InvalidParams msg)) expectedSubstring =
   msg `shouldSatisfy` T.isInfixOf expectedSubstring
 expectInvalidParams other expectedSubstring =
@@ -113,7 +113,7 @@ spec = describe "Typed tool arguments" $ do
   describe "Tool execution errors" $ do
     it "reports handler failures as isError results, not protocol errors" $ do
       result <- callTyped "always_fails" [("reason", String "boom")]
-      case result of
+      case completed result of
         Right tr -> do
           toolResultIsError tr `shouldBe` True
           toolResultContent tr `shouldBe` [ContentText "boom"]
@@ -128,7 +128,7 @@ spec = describe "Typed tool arguments" $ do
   describe "Multi-message prompts" $ do
     it "returns a described multi-message conversation with roles" $ do
       result <- snd convHandlers anonCtx "conversation" (promptArgsMap [("topic", "haskell")])
-      case result of
+      case completed result of
         Right (PromptResult desc msgs) -> do
           desc `shouldBe` Just "About haskell"
           map promptMessageRole msgs `shouldBe` [RoleUser, RoleAssistant]

@@ -17,25 +17,37 @@ import qualified Data.ByteString.Lazy as BSL
 import Data.IORef
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import MCP.Server
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.Wai as Wai
 import Network.Wai.Internal (ResponseReceived (..))
 import Test.Hspec
+import TestHelpers (testStateCodec)
+import qualified Data.Map as Map
 
 server :: McpServerHandlers
 server = noHandlers
   { tools = Just
       ( \_ -> pure []
-      , \_ name _ -> case name of
+      , \ctx name _ -> case name of
           "boom" -> throwIO (ErrorCall "tool exploded")
-          "ok"   -> pure $ Right $ toToolResult ("fine" :: Text)
+          "ok"   -> pure $ Right $ Complete $ toToolResult ("fine" :: Text)
+          "ask"  -> pure $ Right $ case Map.lookup "q" (clientInputResponses ctx) of
+            Nothing -> InputRequired
+              (Map.singleton "q" (ElicitForm "Sure?" (schema (SchemaObject [] []))))
+              (Just "asked")
+            Just _ -> Complete $ toToolResult
+              ("answered after " <> maybe "nothing" id (clientRequestState ctx))
           _      -> pure $ Left $ UnknownTool name
       )
   }
 
-app :: Wai.Application
-app = mcpApplication defaultHttpConfig { httpAllowedOrigins = Nothing }
+app :: IO Wai.Application
+app = mcpApplication defaultHttpConfig
+        { httpAllowedOrigins = Nothing
+        , httpStateCodec = Just testStateCodec  -- shared across 'post's
+        }
         (McpServerInfo "T" "1" "") server
 
 -- | POST a JSON body to /mcp and collect the full response, whether it was
@@ -57,7 +69,8 @@ post extraHeaders body = do
         }
   out <- newIORef mempty
   result <- newIORef Nothing
-  _ <- app req $ \resp -> do
+  application <- app
+  _ <- application req $ \resp -> do
     let (status, headers, withBody) = Wai.responseToStream resp
     withBody $ \streamingBody ->
       streamingBody (\b -> modifyIORef' out (<> b)) (pure ())
@@ -90,8 +103,49 @@ errorIn raw = do
   String m <- KM.lookup "message" e
   pure (round c, m)
 
+-- | A modern tools/call of the "ask" tool, with extra params.
+askCall :: [(Key, Value)] -> Value
+askCall extra = object
+  [ "jsonrpc" .= ("2.0" :: Text)
+  , "id" .= (8 :: Int)
+  , "method" .= ("tools/call" :: Text)
+  , "params" .= object (
+      [ "name" .= ("ask" :: Text)
+      , "_meta" .= object
+          [ "io.modelcontextprotocol/protocolVersion" .= ("2026-07-28" :: Text)
+          , "io.modelcontextprotocol/clientCapabilities" .= object ["elicitation" .= object []]
+          ]
+      ] ++ extra)
+  ]
+
+modernHeaders :: Text -> [HTTP.Header]
+modernHeaders name =
+  [ ("MCP-Protocol-Version", "2026-07-28")
+  , ("Mcp-Method", "tools/call")
+  , ("Mcp-Name", TE.encodeUtf8 name)
+  ]
+
+resultIn :: BS.ByteString -> Maybe Object
+resultIn raw = do
+  Object o <- decodeStrict raw
+  Object r <- KM.lookup "result" o
+  pure r
+
 spec :: Spec
 spec = describe "HTTP transport (in-process WAI)" $ do
+  it "carries a multi round-trip request across two POSTs" $ do
+    (status1, _, body1) <- post (modernHeaders "ask") (askCall [])
+    HTTP.statusCode status1 `shouldBe` 200
+    let first = resultIn body1
+    (first >>= KM.lookup "resultType") `shouldBe` Just (String "input_required")
+    Just (String sealed) <- pure (first >>= KM.lookup "requestState")
+    (status2, _, body2) <- post (modernHeaders "ask") $ askCall
+      [ "inputResponses" .= object ["q" .= object ["action" .= ("accept" :: Text), "content" .= object []]]
+      , "requestState" .= sealed
+      ]
+    HTTP.statusCode status2 `shouldBe` 200
+    body2 `shouldSatisfy` ("answered after asked" `BS.isInfixOf`)
+
   it "answers a normal tool call with 200 and a result" $ do
     (status, _, body) <- post [] (toolCall "ok" [])
     HTTP.statusCode status `shouldBe` 200

@@ -13,6 +13,7 @@ import MCP.Server.Handlers (handleMcpMessage)
 import MCP.Server.JsonRpc
 import MCP.Server.Notifications
 import Test.Hspec
+import TestHelpers (testStateCodec)
 
 subId :: RequestId
 subId = RequestIdNumber 7
@@ -119,7 +120,7 @@ spec = describe "Change notifications" $ do
           }
         run support method params = handleMcpMessage
           (McpServerInfo "T" "1" "")
-          defaultCacheHints
+          defaultCacheHints testStateCodec
           support
           (\_ -> pure ())
           toolsServer

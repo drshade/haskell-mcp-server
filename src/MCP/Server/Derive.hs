@@ -517,19 +517,19 @@ mkDispatchCase style handlerName con = do
            Left err -> pure (Left err)
            Right v  -> do
              r <- $(varE handlerName) $(varE ctxName) v
-             pure (Right (toToolResult r)) |]
+             pure (Right (Complete (toToolResult r))) |]
     ToolArgsOutput builder ->
       [| case $(return decoder) of
            Left err -> pure (Left err)
            Right v  -> do
              r <- $(varE handlerName) $(varE ctxName) v
-             pure (Right (resolveToolOutput $(return builder) r)) |]
+             pure (Right (Complete (resolveToolOutput $(return builder) r))) |]
     PromptArgs ->
       [| case $(return decoder) of
            Left err -> pure (Left err)
            Right v  -> do
              r <- $(varE handlerName) $(varE ctxName) v
-             pure (Right (toPromptResult r)) |]
+             pure (Right (Complete (toPromptResult r))) |]
   clause [litP $ stringL sname] (normalB (return body)) []
 
 -------------------------------------------------------------------------------
@@ -666,7 +666,7 @@ mkResourceAlt handlerName con restQ = case con of
   NormalC name [] -> do
     let resourceURI = "resource://" <> snakeName name
     [| if show $(varE uriName) == $(litE $ stringL resourceURI)
-         then Right <$> $(varE handlerName) $(varE ctxName) $(varE uriName) $(conE name)
+         then Right . Complete <$> $(varE handlerName) $(varE ctxName) $(varE uriName) $(conE name)
          else $restQ |]
   RecC name [] ->
     fail $ "Resource template constructors need at least one field: " ++ nameBase name
@@ -676,7 +676,7 @@ mkResourceAlt handlerName con restQ = case con of
     decoder <- mkSegmentsDecoder segsName name fields
     handled <- [| case $(return decoder) of
                     Left err -> pure (Left err)
-                    Right v  -> Right <$> $(varE handlerName) $(varE ctxName) $(varE uriName) v |]
+                    Right v  -> Right . Complete <$> $(varE handlerName) $(varE ctxName) $(varE uriName) v |]
     rest <- restQ
     matchExp <- [| matchTemplateSegments $(litE $ stringL prefix)
                      $(litE $ integerL $ fromIntegral $ length fields)

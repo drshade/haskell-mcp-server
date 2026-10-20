@@ -15,15 +15,15 @@ import TestTypes
 allTypesHandlers :: (ToolListHandler, ToolCallHandler)
 allTypesHandlers = $(deriveToolHandler ''AllTypesTool 'handleAllTypesTool)
 
-callTool :: Text -> [(Text, Text)] -> IO (Either Error ToolResult)
+callTool :: Text -> [(Text, Text)] -> IO (Either Error (Outcome ToolResult))
 callTool name args = snd allTypesHandlers anonCtx name (stringArgs args)
 
-shouldBeRight :: IO (Either Error ToolResult) -> Text -> IO ()
+shouldBeRight :: IO (Either Error (Outcome ToolResult)) -> Text -> IO ()
 shouldBeRight action expected = do
   result <- action
   result `shouldBeTextResult` expected
 
-shouldBeInvalidParams :: IO (Either Error ToolResult) -> Text -> IO ()
+shouldBeInvalidParams :: IO (Either Error (Outcome ToolResult)) -> Text -> IO ()
 shouldBeInvalidParams action expectedSubstring = do
   result <- action
   case result of
@@ -31,7 +31,7 @@ shouldBeInvalidParams action expectedSubstring = do
       T.isInfixOf expectedSubstring msg `shouldBe` True
     other -> expectationFailure $ "Expected InvalidParams containing '" ++ T.unpack expectedSubstring ++ "' but got: " ++ show other
 
-shouldBeMissingParams :: IO (Either Error ToolResult) -> Text -> IO ()
+shouldBeMissingParams :: IO (Either Error (Outcome ToolResult)) -> Text -> IO ()
 shouldBeMissingParams action expectedSubstring = do
   result <- action
   case result of

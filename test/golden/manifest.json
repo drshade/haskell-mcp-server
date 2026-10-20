@@ -63,6 +63,11 @@
       "notifications": false
     },
     {
+      "name": "legacy/tools-call-input-required",
+      "handlers": "mrtr",
+      "notifications": false
+    },
+    {
       "name": "legacy/tools-call-structured",
       "handlers": "extended",
       "notifications": false
@@ -130,6 +135,21 @@
     {
       "name": "modern/tools-call-echo",
       "handlers": "base",
+      "notifications": false
+    },
+    {
+      "name": "modern/tools-call-input-required",
+      "handlers": "mrtr",
+      "notifications": false
+    },
+    {
+      "name": "modern/tools-call-input-unsupported",
+      "handlers": "mrtr",
+      "notifications": false
+    },
+    {
+      "name": "modern/tools-call-invalid-request-state",
+      "handlers": "mrtr",
       "notifications": false
     },
     {

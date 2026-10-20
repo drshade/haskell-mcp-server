@@ -12,7 +12,9 @@ transport can deliver change notifications (`notifications`). Responses are
 compared as **parsed JSON** (structural equality), not raw bytes, so object
 key order never matters — with one deliberate exception: JSON embedded
 *inside a string* (the structured-output text block) is compared as part of
-the string, so those bytes are canonical: compact, object keys sorted.
+the string, so those bytes are canonical: compact, object keys sorted. A
+fixture string `"<opaque>"` matches any string: it stands for values a
+server generates afresh, such as a sealed `requestState`.
 
 The corpus is deliberately **API-agnostic**: nothing in it refers to this
 library's types or Haskell at all. Any MCP server implementation that
@@ -55,6 +57,13 @@ v0.2.0 anchor, so the anchored capability fixtures stay untouched):
 | Completions | any ref/argument | values = `["alpha", "beta"]` filtered by prefix of the partial value |
 | Tool `echo_structured` | input schema: object, required `input` (string, "The text"); output schema: object, required `echoedText` (string, "The echoed text") and `echoedLength` (integer, "Its length"); description `Echo with structured output` | returns `structuredContent` `{"echoedText": <input>, "echoedLength": <length>}` plus one text content block containing the same JSON |
 | Tool `annotated_probe` | input schema: object, required `probe` (string, "What to probe"); description `A read-only probe`; title `Probe`; annotations `readOnlyHint`/`idempotentHint` true; one icon `https://example.com/probe.png` | returns one text block `probed: <probe>` annotated with audience `["user"]`, priority `0.5` |
+
+The `mrtr` handler set is the `base` set with one tool, which asks for
+input (multi round-trip requests, 2026-07-28):
+
+| Feature | Definition | Behavior |
+|---|---|---|
+| Tool `confirm` | not listed | without an answer under `proceed`: an `input_required` result asking, under the key `proceed`, for an `elicitation/create` form (message `Proceed?`, schema: object, required boolean `ok`), with a request state; with one: one text block `confirmed` |
 
 Cases with `"notifications": true` are answered as if the transport can
 deliver change notifications (stdio with a configured notifier: legacy push
