@@ -58,6 +58,7 @@ module MCP.Server.Ask
 import           Control.Monad            (ap, liftM)
 import           Control.Monad.IO.Class   (MonadIO (..))
 import           Data.Aeson
+import qualified Data.Aeson.KeyMap        as KM
 import           Data.Aeson.Types         (parseEither)
 import qualified Data.ByteString.Lazy     as BSL
 import           Data.Map                 (Map)
@@ -221,7 +222,7 @@ question request parse = Ask $ \ctx run ->
       | otherwise -> case Map.lookup key (clientInputResponses ctx) of
           Nothing
             | supported -> suspend
-            | otherwise -> Done Unavailable (record Unavailable')
+            | otherwise -> Done Unavailable (record Unavailable') { runPending = Nothing }
           Just response -> case recordResponse response >>= \r -> (,) r <$> answerOf parse r of
             Right (recorded, a) -> Done a (record recorded) { runPending = Nothing }
             Left err -> Failed $ InvalidParams $ "inputResponses: " <> key <> ": " <> err
@@ -284,8 +285,8 @@ instance ToJSON Entry where
 
 instance FromJSON Entry where
   parseJSON = withObject "Entry" $ \o -> do
-    stepped <- o .:? "s"
-    case stepped of
+    -- By presence: a step's result may itself be null.
+    case KM.lookup "s" o of
       Just v -> pure (Stepped v)
       Nothing -> do
         fp <- o .: "q"

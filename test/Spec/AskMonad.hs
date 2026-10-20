@@ -58,12 +58,22 @@ fickle counter = do
   reply <- elicit ("Question " <> T.pack (show n))
   pure (T.pack (show (reply :: Answer Confirm)))
 
+-- | A step whose result is JSON null, then a question.
+nullStep :: Ask Text
+nullStep = do
+  nothing <- step (pure (Nothing :: Maybe Text))
+  reply <- elicit "Still there?"
+  pure (T.pack (show (nothing, reply :: Answer Confirm)))
+
 handlersFor :: Counters -> IORef Int -> McpServerHandlers
 handlersFor counters fickleCounter = noHandlers
   { tools = Just
       ( \_ -> pure []
       , \ctx name _ -> fmap (fmap (\t -> toolResult [ContentText t])) <$>
-          runAsk (if name == "fickle" then fickle fickleCounter else deploy counters) ctx
+          runAsk (case name of
+                    "fickle" -> fickle fickleCounter
+                    "null"   -> nullStep
+                    _        -> deploy counters) ctx
       )
   }
 
@@ -229,3 +239,19 @@ spec = describe "The Ask monad" $ do
     let unrelated = answer "1" (accepted ["environment" .= ("staging" :: Text)]) : retrying r1
     r2 <- call env "deploy" formCaps unrelated
     questionsOf r2 `shouldBe` [("0", String "Where to?")]
+
+  it "replays a step whose result is null" $ do
+    env <- newCounters
+    r1 <- call env "null" formCaps []
+    questionsOf r1 `shouldBe` [("1", String "Still there?")]
+    r2 <- call env "null" formCaps $ answer "1" (accepted ["ok" .= True]) : retrying r1
+    textOf r2 `shouldBe` Just (String "(Nothing,Accepted (Confirm {ok = True}))")
+
+  it "settles a pending question as Unavailable when the client can no longer ask" $ do
+    env <- newCounters
+    r1 <- call env "deploy" formCaps []
+    r2 <- call env "deploy" noCaps (retrying r1)
+    textOf r2 `shouldBe` Just (String "no target: Unavailable")
+    r3 <- call env "null" formCaps []
+    r4 <- call env "null" noCaps (retrying r3)
+    textOf r4 `shouldBe` Just (String "(Nothing,Unavailable)")
