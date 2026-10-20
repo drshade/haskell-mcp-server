@@ -71,8 +71,7 @@ multi round-trip requests of MCP 2026-07-28 (ADR 0009).
 * Documentation: every module has a header and every export a doc
   comment, and Haddock links that were ambiguous or out of scope are
   fixed.
-* New dependencies: `base64-bytestring`, `crypton` (1.1.4 to 2.2), `ram`
-  and `time`.
+* New dependencies: `crypton` (1.1.4 to 2.2), `ram` and `time`.
 
 ### Breaking changes, in full
 
