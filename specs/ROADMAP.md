@@ -33,4 +33,4 @@ What has shipped, and in which release, is in the
   we advertise `subscribe` only to modern clients.
 - **JSON-RPC batching and SSE resumability** — removed from the spec.
 - **A per-feature release cadence** — releases are batched; CHANGELOG
-  entries carry `???` dates until the Hackage upload stamps them.
+  entries carry `???` dates until the release-prep PR stamps them.

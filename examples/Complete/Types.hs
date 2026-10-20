@@ -4,7 +4,7 @@ module Types where
 
 import           Data.Text (Text)
 
--- High-level data type definitions from SPEC.md
+-- High-level data type definitions (see specs/ADR_0001_original_spec.md)
 
 data MyPrompt
     = Recipe { idea :: Text }

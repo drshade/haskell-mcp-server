@@ -3,7 +3,6 @@
 
 module Spec.ToolCallParsing (spec) where
 
-import Data.Aeson (Value (..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import MCP.Server

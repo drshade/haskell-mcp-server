@@ -1,7 +1,6 @@
 # ADR 0012: Tasks extension
 
-- **Status**: Hold — until the extension spec stabilizes and ADR_0007/0008
-  have landed
+- **Status**: Hold — until the extension spec stabilizes
 - **Date**: 2026-08-01
 - **Depends on**: ADR_0007, ADR_0008, ADR_0011 (extensions capability)
 

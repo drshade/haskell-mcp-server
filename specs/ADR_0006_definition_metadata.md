@@ -16,18 +16,18 @@ definition and content types:
 - **Icons** (2025-11-25): optional icon lists on tool/prompt/resource
   definitions.
 - **Content annotations** (2025-03-26): `audience`, `priority`,
-  `lastModified` on content blocks. The 0.2.0 plan named these ("Content
+  `lastModified` on content blocks. An earlier plan named these ("Content
   grows audio/resource-link/annotations") but the annotations part did not
   land.
 
 ## Decision
 
-- Add an `Annotations` record to `Content` variants (optional field,
-  omitted from JSON when absent) and `ToolAnnotations`/icon fields to the
+- Add a `ContentAnnotated Annotations Content` wrapper to `Content`
+  (its annotations are merged into the inner block's JSON) and `ToolAnnotations`/icon fields to the
   definition types, serialized per spec.
 - Extend the derive customization API: alongside the existing
   `[("Constructor", "Description")]` mechanism, accept per-constructor
-  options (a small record — working name `ToolOptions` — carrying
+  options (a small record, `DefinitionOptions`, carrying
   annotations, icon, title) via a `WithOptions` variant. The plain
   string-pair API stays as-is.
 

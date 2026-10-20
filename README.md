@@ -61,7 +61,8 @@ data MyTool
     | ...
 ```
 
-`tools/list` returns exactly this (captured from the running example):
+`tools/list` returns exactly this (captured from the running example; a
+field without a description is described by its name):
 
 ```json
 {
@@ -72,14 +73,16 @@ data MyTool
     "type": "object",
     "required": ["speed", "shipTo"],
     "properties": {
-      "speed":  { "type": "string", "enum": ["standard", "express", "overnight"] },
+      "speed":  { "type": "string", "enum": ["standard", "express", "overnight"],
+                  "description": "speed" },
       "shipTo": {
         "type": "object",
+        "description": "shipTo",
         "required": ["street", "city"],
         "properties": {
-          "street":  { "type": "string" },
-          "city":    { "type": "string" },
-          "zipCode": { "type": "string" }
+          "street":  { "type": "string", "description": "street" },
+          "city":    { "type": "string", "description": "city" },
+          "zipCode": { "type": "string", "description": "zipCode" }
         }
       }
     }
@@ -228,7 +231,7 @@ A constructor may also wrap a single record type, which is unwrapped
 recursively until a record is found:
 
 ```haskell
-data SetValueParams = SetValueParams { key :: Text, value :: Text }
+data SetValueParams = SetValueParams { setKey :: Text, setValue :: Text }
 
 data SimpleTool
     = GetValue { key :: Text }
@@ -292,7 +295,7 @@ value; `ToolOutputRaw` is the escape hatch back to a plain `ToolResult`.
 
 ### Descriptions, annotations and icons
 
-Every `derive*` function has a `WithDescription` variant taking a flat list of
+Every `derive*Handler` and `deriveResourceTemplates` function has a `WithDescription` variant taking a flat list of
 constructor and field descriptions, and a `WithOptions` variant taking
 per-constructor `DefinitionOptions`: description, title, icons, behavioral
 annotations (which drive client permission UX, such as auto-approving
@@ -454,7 +457,7 @@ change-notification source.
 ### Streamable HTTP
 
 ```haskell
-import MCP.Server.Transport.Http
+import MCP.Server
 
 main = runMcpServerHttp serverInfo handlers            -- localhost:3000/mcp
 

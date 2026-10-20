@@ -1,53 +1,92 @@
 # Revision history for mcp-server
 
-## 0.3.0.1 - ???
+## 0.4.0.0 - 2026-10-20
 
-* Multi round-trip requests (ADR 0009, first phase): `tools/call`,
-  `prompts/get` and `resources/read` handlers can ask the client for input
-  by returning `InputRequired`, answered as an `input_required` result
-  (2026-07-28). Retries carry the answers in `clientInputResponses` and the
-  handler's state in `clientRequestState`. `clientSupportsInput` checks
-  the client's protocol revision and declared capabilities.
-* The `requestState` sent to clients is sealed by a `StateCodec`
-  (new module `MCP.Server.RequestState`): ChaCha20-Poly1305, bound to the
-  caller, the request's parameters and an expiry, and verified before the
-  handler runs. The default key is random per process; `stdioStateCodec`
-  and `httpStateCodec` configure a shared key, with rotation.
-* The `Ask` monad (ADR 0009, second phase; new module `MCP.Server.Ask`,
-  re-exported by `MCP.Server`): handlers that ask several questions are
-  written as straight-line code with `elicit`, `elicitUrl` and `step`, and
-  run with `runAsk`. Each round replays a journal kept in the request
-  state: answers and `step` results are recorded once and returned on
-  later rounds, and a handler that asks something different at a position
-  fails rather than receiving the wrong answer. `elicit` returns
-  `Unavailable` without a round trip when the client cannot ask. Forms
-  are instances of the new `Form` class.
-* Derived handlers can ask (ADR 0009, third phase): the
-  `derive*Handler` functions accept handlers returning `Ask` as well as
-  `IO`, through the new `HandlerMonad` class, so a handler starts asking
-  by changing its type. `deriveForm`, `deriveFormWithDescription` and
-  `deriveFormWithOptions` (labels and defaults, via `FormFieldOptions`)
-  derive `Form` instances from flat records; fields a form cannot hold,
-  unknown option fields and ill-typed defaults are compile-time errors.
-  `MCP.Server.Derive` re-exports aeson's `Value` for writing defaults.
+Handlers can ask the user for input part-way through a request: the
+multi round-trip requests of MCP 2026-07-28 (ADR 0009).
+
+### Upgrading from 0.3
+
+* Derived handlers (`derive*Handler`) need no changes.
+* Hand-written `ToolCallHandler`, `PromptGetHandler` and
+  `ResourceReadHandler` functions return `Outcome`: wrap results in
+  `Complete`, e.g. `Right (Complete result)`.
+* Code that builds a `ClientContext` by hand should start from
+  `anonymousContext` and record-update it; the type gained fields.
+* `mcpApplication` returns `IO Application`: bind it before handing it
+  to Warp.
+* Code that calls `handleMcpMessage` directly passes a `StateCodec` after
+  the `CacheHints`; `handlePromptsGet`, `handleResourcesRead` and
+  `handleToolsCall` take one as their first argument. One from
+  `ephemeralStateCodec` will do.
+* `MCP.Server` now exports the names of `MCP.Server.Ask` (`Ask`, `elicit`,
+  `elicitUrl`, `step`, `Form`, `Answer(..)`, `HandlerMonad`, `runAsk`,
+  `askContext`): hide or qualify them where they clash with your own.
+* `MCP.Server.Derive` now exports aeson's `Value`, so a module that also
+  imports `Value` from `Data.Aeson` may get a redundant-import warning;
+  drop one of the two.
+
+### Asking for input
+
+* Derived handlers can ask: the `derive*Handler` functions accept
+  handlers returning `Ask` as well as `IO` (through the new
+  `HandlerMonad` class), so a handler starts asking by changing its
+  type. `elicit` asks for a form and `elicitUrl` sends the user to a URL;
+  the answer is `Accepted`, `Declined`, `Cancelled` or, without a round
+  trip when the client cannot ask, `Unavailable`.
+* `deriveForm`, `deriveFormWithDescription` and `deriveFormWithOptions`
+  (labels and defaults, via `FormFieldOptions`) derive the new `Form`
+  class from flat records. Fields a form cannot hold, options for unknown
+  fields and defaults that do not fit their field are compile-time
+  errors. `MCP.Server.Derive` re-exports aeson's `Value` for writing
+  defaults.
+* The `Ask` monad (new module `MCP.Server.Ask`, re-exported by
+  `MCP.Server`) runs a handler from the start on every round against a
+  journal of earlier rounds: answers and `step` results are recorded once
+  and replayed. A handler that asks something different at a position
+  fails rather than receiving the wrong answer. `runAsk` runs one from a
+  hand-written handler.
+* Low level: call handlers return `Outcome` (`Complete`, or
+  `InputRequired` with requests and state), answered as an
+  `input_required` result. Retries carry the answers in
+  `clientInputResponses` and the handler's state in
+  `clientRequestState`; `clientSupportsInput` checks the client's
+  protocol revision and declared capabilities.
+* The `requestState` sent to clients is sealed by a `StateCodec` (new
+  module `MCP.Server.RequestState`): ChaCha20-Poly1305, bound to the
+  caller, the request's parameters and an expiry (60 minutes by
+  default), and verified before the handler runs. The default key is
+  random per process; multi-instance HTTP deployments set a shared key
+  with `httpStateCodec` and `aeadStateCodec`, which supports rotation.
+  `stdioStateCodec` does the same for stdio.
 * New example `ask-example` (`examples/Ask`): a table-booking server whose
   tools ask the user for details and confirmation.
+
+### Other changes
+
 * `deriveToolHandlerWithOutput` and its variants no longer need
   `toJSON`, `object` and `.=` from `Data.Aeson` in scope where they are
   spliced: the generated serializer looked those names up in the user's
   module.
-* BREAKING: `ToolCallHandler`, `PromptGetHandler` and `ResourceReadHandler`
-  return `Outcome`; hand-written handlers wrap results in `Complete`.
-  Derived handlers are unaffected.
-* BREAKING: `ClientContext` gains `clientInputResponses` and
-  `clientRequestState`; `StdioConfig` and `HttpConfig` gain a state codec
-  field; `handleMcpMessage` and the per-method handlers take a
-  `StateCodec`; `mcpApplication` returns `IO Application`, creating the
-  default key once.
-* New dependencies: `crypton` (1.1.4 to 2.2), `ram` and `time`.
 * Documentation: every module has a header and every export a doc
   comment, and Haddock links that were ambiguous or out of scope are
-  fixed. No API changes.
+  fixed.
+* New dependencies: `base64-bytestring`, `crypton` (1.1.4 to 2.2), `ram`
+  and `time`.
+
+### Breaking changes, in full
+
+* `ToolCallHandler`, `PromptGetHandler` and `ResourceReadHandler` return
+  `Outcome`.
+* `ClientContext` gains `clientInputResponses` and `clientRequestState`;
+  `StdioConfig` and `HttpConfig` gain `stdioStateCodec` and
+  `httpStateCodec`.
+* `handleMcpMessage`, `handlePromptsGet`, `handleResourcesRead` and
+  `handleToolsCall` take a `StateCodec`.
+* `mcpApplication` returns `IO Application`, creating the default key
+  once.
+* `MCP.Server` exports `MCP.Server.Ask`, and `MCP.Server.Derive` exports
+  aeson's `Value`: new names that can clash with or duplicate yours.
 
 ## 0.3.0.0 - 2026-10-16
 

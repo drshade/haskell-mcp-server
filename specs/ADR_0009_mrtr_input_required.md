@@ -142,7 +142,7 @@ data InputResponse
   = ElicitResponse ElicitAction (Maybe (Map Text Value))
   | RawInputResponse Value
 
-data ElicitAction = Accept | Decline | Cancel
+data ElicitAction = ElicitAccept | ElicitDecline | ElicitCancel
 ```
 
 On a retry, `ClientContext` carries the decoded `inputResponses` and the
@@ -228,7 +228,8 @@ a request the client cannot handle is a server bug, answered with
 The library owns the `requestState` wire value. Its payload is:
 
 - a format version;
-- the authenticated principal (`clientPrincipal`), or none;
+- a SHA-256 digest of the authenticated principal (`clientPrincipal`,
+  or null);
 - the method and a SHA-256 digest of the request's parameters, excluding
   `inputResponses`, `requestState` and `_meta`;
 - an expiry;

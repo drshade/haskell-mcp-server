@@ -6,7 +6,7 @@
 
 ## Context
 
-Since 0.2.1.0 the golden fixtures under `test/golden/` are a
+The golden fixtures under `test/golden/` are a
 self-describing, API-agnostic conformance corpus: on-disk
 request/response pairs per protocol era, enumerated by a manifest, with
 the reference server documented in prose. Nothing in it is
