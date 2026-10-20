@@ -19,6 +19,9 @@ module MCP.Server
   , defaultHttpConfig
   , mcpApplication
 
+    -- * Handlers that ask the client for input
+  , module MCP.Server.Ask
+
     -- * Request state (multi round-trip requests)
   , StateCodec(..)
   , StateError(..)
@@ -38,6 +41,7 @@ module MCP.Server
   , module MCP.Server.Types
   ) where
 
+import           MCP.Server.Ask
 import           MCP.Server.Notifications (McpNotifier (..), NotificationSource,
                                            newMcpNotifier)
 import           MCP.Server.Transport.Stdio (StdioConfig (..), defaultStdioConfig,

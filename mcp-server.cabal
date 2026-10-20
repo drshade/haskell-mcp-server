@@ -71,6 +71,7 @@ library
   -- Modules exported by the library.
   exposed-modules:
     MCP.Server
+    MCP.Server.Ask
     MCP.Server.Derive
     MCP.Server.Handlers
     MCP.Server.JsonRpc
@@ -186,6 +187,7 @@ test-suite haskell-mcp-server-test
   -- Modules included in this executable, other than Main.
   other-modules:
     Spec.AdvancedDerivation
+    Spec.AskMonad
     Spec.BasicDerivation
     Spec.Cancellation
     Spec.DefinitionMetadata

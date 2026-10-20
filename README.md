@@ -613,9 +613,53 @@ main = do
     serverInfo handlers
 ```
 
-Derived handlers will be able to ask questions as straight-line code in an
-`Ask` monad, with forms derived from records; see
-[ADR 0009](specs/ADR_0009_mrtr_input_required.md).
+### Straight-line handlers with `Ask`
+
+Juggling keys and state by hand gets awkward past one question. In the
+`Ask` monad a handler asks its questions in order, as if it could wait for
+the answers:
+
+```haskell
+newtype Confirm = Confirm { ok :: Bool } deriving Generic
+instance FromJSON Confirm
+instance Form Confirm where
+  formSchema _ = schema (SchemaObject [("ok", schema SchemaBoolean)] ["ok"])
+
+deploy :: Text -> Ask ToolResult
+deploy service = do
+  plan <- step (planDeploy service)          -- runs once; replayed afterwards
+  answer <- elicit ("Apply " <> describePlan plan <> "?")
+  case answer of
+    Accepted (Confirm True) -> do
+      step (applyPlan plan)
+      pure (toolResult [ContentText "Deployed"])
+    Unavailable -> pure (toolError "This client cannot confirm a deployment")
+    _ -> pure (toolResult [ContentText "Cancelled"])
+
+handleCall :: ToolCallHandler
+handleCall ctx "deploy" args = runAsk (deploy (serviceOf args)) ctx
+handleCall _ name _ = pure (Left (UnknownTool name))
+```
+
+The handler does not pause between rounds: it runs again from the start on
+every retry, and the library replays a journal, kept in the protected
+state, of what earlier rounds produced. `elicit` returns the recorded
+answer, or ends the round with its question; `step` returns its recorded
+result instead of running the action again. `elicit` answers
+`Unavailable`, without a round trip, when the client cannot ask. Three
+rules follow:
+
+- Ask the same questions and run the same steps in the same order on every
+  round. A handler that strays from its journal fails with an internal
+  error naming the position.
+- `step` is at-least-once: a client that retries from an earlier state runs
+  later steps again. Make effects that must happen once idempotent.
+- `step` results travel to the client and back, encrypted, on every later
+  round: return an id rather than the whole object. Plain `liftIO` is not
+  journaled and runs on every round.
+
+Derived handlers will be able to return `Ask` directly, with forms derived
+from records; see [ADR 0009](specs/ADR_0009_mrtr_input_required.md).
 
 ## Change notifications
 

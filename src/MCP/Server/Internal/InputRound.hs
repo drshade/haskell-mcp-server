@@ -14,23 +14,19 @@ module MCP.Server.Internal.InputRound
   ) where
 
 import           Control.Monad            (unless, when)
-import qualified Crypto.Hash              as Hash
 import           Data.Aeson
 import qualified Data.Aeson.Key           as Key
 import qualified Data.Aeson.KeyMap        as KM
 import           Data.Aeson.Types         (parseEither)
-import qualified Data.ByteArray           as BA
-import qualified Data.ByteString.Base64.URL as B64
 import qualified Data.ByteString.Lazy     as BSL
 import           Data.Map                 (Map)
 import qualified Data.Map                 as Map
 import           Data.Text                (Text)
 import qualified Data.Text                as T
-import qualified Data.Text.Encoding       as TE
 import           Data.Time.Clock.POSIX    (getPOSIXTime)
 import           System.IO                (hPutStrLn, stderr)
 
-import           MCP.Server.Internal.Json (canonicalJson)
+import           MCP.Server.Internal.Json (jsonDigest)
 import           MCP.Server.JsonRpc       (JsonRpcError (..))
 import           MCP.Server.RequestState
 import           MCP.Server.Types
@@ -177,14 +173,10 @@ invalidParams message = JsonRpcError
 -- | Digest of the request parameters that define the request: everything
 -- but the round's own fields and @_meta@.
 paramsDigest :: Maybe Value -> Text
-paramsDigest params = digest $ case params of
+paramsDigest params = jsonDigest $ case params of
   Just (Object o) -> Object (foldr KM.delete o ["inputResponses", "requestState", "_meta"])
   Just v          -> v
   Nothing         -> Null
 
 principalDigest :: ClientContext -> Text
-principalDigest = digest . maybe Null id . clientPrincipal
-
-digest :: Value -> Text
-digest v = TE.decodeUtf8 $ B64.encode $ BA.convert
-  (Hash.hashlazy (canonicalJson v) :: Hash.Digest Hash.SHA256)
+principalDigest = jsonDigest . maybe Null id . clientPrincipal
