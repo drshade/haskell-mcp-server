@@ -45,7 +45,7 @@ and `forecast`, each with a JSON schema derived from its constructor's fields.
 
 The derivation reads your types, so the schema on the wire always matches the
 handler that receives the arguments. Given this constructor from
-[`examples/Complete`](examples/Complete/Types.hs):
+[`examples/Complete`](https://github.com/drshade/haskell-mcp-server/blob/main/examples/Complete/Types.hs):
 
 ```haskell
 data ShippingSpeed = Standard | Express | Overnight
@@ -178,7 +178,7 @@ url = "http://localhost:3000/mcp"
 
 Claude Desktop launches stdio servers from `claude_desktop_config.json`. A
 Docker image is a convenient way to ship a Haskell binary to it — the
-repository's [`Dockerfile`](Dockerfile) builds all the examples:
+repository's [`Dockerfile`](https://github.com/drshade/haskell-mcp-server/blob/main/Dockerfile) builds all the examples:
 
 ```bash
 docker build -t haskell-mcp-server .
@@ -403,7 +403,7 @@ Two Template Haskell details to know:
 
 - A `derive*` splice can only see types declared in an earlier declaration
   group. Either put the types in their own module (as the
-  [examples](examples/) do) or end the group with an empty `$(pure [])`
+  [examples](https://github.com/drshade/haskell-mcp-server/tree/main/examples/) do) or end the group with an empty `$(pure [])`
   splice before the `main` that uses them.
 - Every handler receives the per-request `ClientContext` first. It carries the
   caller's bearer token and principal on HTTP, the protocol revision and
@@ -757,18 +757,18 @@ capabilities are advertised only where delivery is possible:
 
 Design decisions and planned work (OAuth resource metadata, pagination,
 the tasks extension) live as ADRs under
-[`specs/`](specs/README.md), ordered by [`specs/ROADMAP.md`](specs/ROADMAP.md).
+[`specs/`](https://github.com/drshade/haskell-mcp-server/blob/main/specs/README.md), ordered by [`specs/ROADMAP.md`](https://github.com/drshade/haskell-mcp-server/blob/main/specs/ROADMAP.md).
 
 ## Examples
 
-- [`examples/Simple/`](examples/Simple/): a key-value store with two tools over stdio.
-- [`examples/Complete/`](examples/Complete/): prompts, resources, a resource
+- [`examples/Simple/`](https://github.com/drshade/haskell-mcp-server/tree/main/examples/Simple): a key-value store with two tools over stdio.
+- [`examples/Complete/`](https://github.com/drshade/haskell-mcp-server/tree/main/examples/Complete): prompts, resources, a resource
   template, tools with enum, nested and list arguments, `isError`,
   annotations, progress and completions.
-- [`examples/Ask/`](examples/Ask/): tools that ask the user for input
+- [`examples/Ask/`](https://github.com/drshade/haskell-mcp-server/tree/main/examples/Ask): tools that ask the user for input
   part-way through: a table booking with a derived form, a confirmation
   and a fallback for clients that cannot ask.
-- [`examples/HttpSimple/`](examples/HttpSimple/): the key-value store over
+- [`examples/HttpSimple/`](https://github.com/drshade/haskell-mcp-server/tree/main/examples/HttpSimple): the key-value store over
   Streamable HTTP.
 
 ```bash
@@ -779,7 +779,7 @@ cabal run http-simple-example   # http://localhost:3000/mcp
 
 ## Conformance corpus
 
-The wire-format fixtures under [`test/golden/`](test/golden/README.md) are a
+The wire-format fixtures under [`test/golden/`](https://github.com/drshade/haskell-mcp-server/blob/main/test/golden/README.md) are a
 language-agnostic MCP conformance corpus: each case is a raw JSON-RPC
 `.request.json` and the exact `.response.json` a reference server answers,
 per protocol era, enumerated by a `manifest.json`. Any MCP implementation
@@ -795,7 +795,7 @@ requests and diff the responses. Contributions of new cases are welcome.
 ## Contributing
 
 Contributions are welcome. See the issue tracker for open issues and feature
-requests, and [RELEASING.md](RELEASING.md) for how versions reach Hackage.
+requests, and [RELEASING.md](https://github.com/drshade/haskell-mcp-server/blob/main/RELEASING.md) for how versions reach Hackage.
 
 ## AI assistance
 

@@ -26,9 +26,12 @@ What has shipped, and in which release, is in the
 
 ## Deliberate non-goals
 
-- **Roots, sampling, client-directed logging** — formally deprecated in
-  2026-07-28; stderr (stdio) is the blessed logging channel and we already
-  use it.
+- **Roots, sampling, session-level logging** — formally deprecated in
+  2026-07-28. That covers `logging/setLevel` and the session-wide log
+  stream it controlled; stderr (stdio) is the blessed channel for server
+  logs. Per-request logging is not part of this: a request that declares
+  `io.modelcontextprotocol/logLevel` gets `notifications/message` through
+  `logToClient`, which is supported.
 - **Legacy `resources/subscribe`** — superseded by `subscriptions/listen`;
   we advertise `subscribe` only to modern clients.
 - **JSON-RPC batching and SSE resumability** — removed from the spec.
