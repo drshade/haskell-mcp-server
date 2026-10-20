@@ -6,7 +6,7 @@
 -- prompts.
 module Spec.TypedArgs (spec) where
 
-import Data.Aeson (Value (..), object, toJSON, (.=))
+import Data.Aeson (object, toJSON, (.=))
 import Data.Text (Text)
 import qualified Data.Text as T
 import MCP.Server

@@ -23,9 +23,7 @@ main = do
                 Nothing -> pure $ ContentText $ "Key '" <> k <> "' not found"
                 Just v  -> pure $ ContentText v
         handleTool _ (SetValue k v) = do
-            pairs <- readIORef store
-            let newPairs = (k, v) : filter ((/= k) . fst) pairs
-            writeIORef store newPairs
+            atomicModifyIORef' store $ \pairs -> ((k, v) : filter ((/= k) . fst) pairs, ())
             pure $ ContentText $ "Set '" <> k <> "' to '" <> v <> "'"
 
     -- Derive the tool handlers using Template Haskell with descriptions

@@ -9,7 +9,7 @@ workflow's guards.
 ## Procedure
 
 1. **Release-prep PR.** On a branch, stamp the date on the pending
-   CHANGELOG entry (`## 0.2.0.3 - 2026-10-01`). The version in
+   CHANGELOG entry (`## X.Y.Z.W - YYYY-MM-DD`). The version in
    `mcp-server.cabal` should already be right; check it follows the PVP
    comment block there. Review this PR as the release review: once the
    tag is pushed there is no further checkpoint. Merge it.
@@ -17,11 +17,13 @@ workflow's guards.
 2. **Tag.** On the merged `main`:
 
    ```bash
-   git tag v0.2.0.3
-   git push origin v0.2.0.3
+   version=$(sed -n 's/^version: *//p' mcp-server.cabal)
+   git tag "v$version"
+   git push origin "v$version"
    ```
 
-   The tag must be `v` followed by the exact cabal version.
+   The tag must be `v` followed by the exact cabal version; reading it
+   from `mcp-server.cabal` keeps the two from drifting.
 
 3. **Wait for the `Hackage release` workflow.** It refuses to proceed if
    the tag and cabal version disagree, or if the CHANGELOG entry for that

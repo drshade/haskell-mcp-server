@@ -6,7 +6,7 @@
 
 ## Context
 
-Since 0.2.0 the protocol layer carries `outputSchema` on `ToolDefinition`
+The protocol layer carries `outputSchema` on `ToolDefinition`
 and `structuredContent` on tool results, but only manual handlers can
 populate them — the Template Haskell derivation always emits
 `toolDefinitionOutputSchema = Nothing`. Meanwhile the library's entire
@@ -36,7 +36,7 @@ the full structured-output story for free:
 
 - Completes the typed core end-to-end (typed in, typed out); no other MCP
   library derives both sides declaratively.
-- New exports → PVP minor bump; can join the pending 0.2.1.x line.
+- New exports → PVP minor bump.
 - The schema generator is shared with input derivation, so schema-feature
   work (e.g. richer JSON Schema keywords) benefits both directions.
 - Golden corpus gains structured-output cases in both eras.

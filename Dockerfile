@@ -48,5 +48,5 @@ COPY --from=builder /usr/local/bin/ask-example /usr/local/bin/ask-example
 
 WORKDIR /app
 
-# Default entrypoint is the main executable
-ENTRYPOINT ["/usr/local/bin/haskell-mcp-lib"]
+# Default entrypoint; choose another example with --entrypoint
+ENTRYPOINT ["/usr/local/bin/simple-example"]
