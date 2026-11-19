@@ -1,5 +1,11 @@
 # Revision history for mcp-server
 
+## 0.3.0.2 - ???
+
+* Build against `http-types` older than 0.12.5 again: the HTTP transport
+  took `hOrigin` from `Network.HTTP.Types`, which only re-exports header
+  names from 0.12.5 (#48).
+
 ## 0.3.0.1 - 2026-10-20
 
 Handlers can ask the user for input part-way through a request: the
