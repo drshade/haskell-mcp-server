@@ -39,7 +39,12 @@ import           Data.Text                (Text)
 import qualified Data.Text                as T
 import qualified Data.Text.Encoding       as TE
 import           Data.Text.Encoding.Error (lenientDecode)
-import           Network.HTTP.Types
+import           Network.HTTP.Types       (ResponseHeaders, Status, status200,
+                                           status202, status400, status401,
+                                           status403, status404, status405)
+-- Header names come from the Header module: Network.HTTP.Types only
+-- re-exports all of them from http-types 0.12.5.
+import           Network.HTTP.Types.Header (hAuthorization, hOrigin)
 import qualified Network.Wai              as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import           System.IO                (hPutStrLn, stderr)
